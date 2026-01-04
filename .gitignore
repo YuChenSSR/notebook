@@ -51,6 +51,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# ========= Independent repos (不纳入版本控制) =========
+qlib/
+
+
 # ========= Logs =========
 *.log
 logs/
@@ -106,5 +110,4 @@ MASTER/*_single_day_*.csv
 *.tar.gz
 *.zip
 *.7z
-
 

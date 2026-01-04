@@ -1,0 +1,107 @@
+# ========= Python / Packaging =========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+*.whl
+
+# ========= Virtualenv / Env files =========
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ========= Jupyter =========
+.ipynb_checkpoints/
+# 如果你希望忽略所有 notebook，可取消注释下一行
+# *.ipynb
+
+# ========= Tests / Type-check / Lint caches =========
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.pyre/
+.pytype/
+
+# ========= IDE / Editor =========
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# ========= OS =========
+.DS_Store
+Thumbs.db
+
+# ========= Logs =========
+*.log
+logs/
+Log/
+
+# ========= Data / Model artifacts (common in quant research) =========
+*.pkl
+*.pickle
+*.joblib
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.hd5
+*.parquet
+*.feather
+*.arrow
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# ========= Project-specific generated outputs =========
+# qlib build outputs (qlib 子项目自己也有 .gitignore，这里做兜底)
+qlib/build/
+qlib/dist/
+
+# Large downloaded/derived data folders in this repo
+qlib_bin/
+futures/data/raw_data/
+rqdata/Data/
+rqdata/Log/
+rqdata/dump_qlib/
+qds/Data/
+zxf/data/
+
+# Backtest / result outputs
+MASTER/backtest_result/
+MASTER/Backtest_results/
+MASTER/Master_results/
+MASTER/out_features/
+MASTER/model/
+MASTER/data/daily_predict/
+
+# Generated prediction csvs in MASTER root
+MASTER/master_predictions*.csv
+MASTER/*_single_day_*.csv
+
+# ========= Archives =========
+*.tar.gz
+*.zip
+*.7z
+
+

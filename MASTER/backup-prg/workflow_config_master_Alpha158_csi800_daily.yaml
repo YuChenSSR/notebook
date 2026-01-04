@@ -1,0 +1,109 @@
+qlib_init:
+    provider_uri: "~/Downloads/qlib_bin"
+    region: cn
+market: &market csi800
+benchmark: &benchmark SH000906
+data_handler_config: &data_handler_config
+    start_time: 2015-01-01
+    end_time: 2025-10-29
+    fit_start_time: 2015-01-01
+    fit_end_time: 2023-12-31
+    instruments: *market
+    infer_processors:
+        - class: RobustZScoreNorm
+          kwargs:
+              fields_group: feature
+              clip_outlier: true
+        - class: Fillna
+          kwargs:
+              fields_group: feature
+    learn_processors:
+        - class: DropnaLabel
+          kwargs:
+              fields_group: label
+    label: ["Ref($adjclose, -5) / Ref($adjclose, -1) - 1"]
+market_data_handler_config: &market_data_handler_config
+    start_time: 2015-01-01
+    end_time: 2025-10-29
+    fit_start_time: 2015-01-01
+    fit_end_time: 2023-12-31
+    instruments: *market
+    infer_processors:
+        - class: RobustZScoreNorm
+          kwargs:
+              fields_group: feature
+              clip_outlier: true
+        - class: Fillna
+          kwargs:
+              fields_group: feature
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy
+        kwargs:
+            signal: <PRED>
+            topk: 30
+            n_drop: 3
+    backtest:
+        start_time: 2025-01-01
+        end_time: 2025-10-29
+        freq: day
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            deal_price: close
+            limit_threshold: 0.095
+            open_cost: 0.0015
+            close_cost: 0.0015
+            min_cost: 5
+task:
+    model:
+        class: MASTERModel
+        module_path: qlib.contrib.model.pytorch_master_ts
+        kwargs:
+            seed: 0
+            seed_num: 5
+            d_feat: 435
+            d_model: 256
+            gate_input_start_index: 435
+            gate_input_end_index: 523
+            t_nhead: 4
+            s_nhead: 2
+            dropout: 0.5
+            n_epochs: 100
+            lr: 0.00001
+            train_stop_loss_thred: 0.92
+            GPU: 0
+            beta: 2
+            market: *market
+            benchmark: *benchmark
+            save_prefix: *market
+    dataset:
+        class: MASTERTSDatasetH
+        module_path: qlib.contrib.data.dataset
+        kwargs:
+            handler:
+                class: Alpha158
+                module_path: qlib.contrib.data.handler
+                kwargs: *data_handler_config
+            segments:
+                train: [2015-01-01, 2023-12-31]
+                valid: [2024-01-01, 2024-12-31]
+                test: [2025-01-01, 2025-10-29]
+            step_len: 8
+            market_data_handler_config: *market_data_handler_config
+    record: 
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+          kwargs: 
+            model: <MODEL>
+            dataset: <DATASET>
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs: 
+            ana_long_short: False
+            ann_scaler: 252
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs: 
+            config: *port_analysis_config

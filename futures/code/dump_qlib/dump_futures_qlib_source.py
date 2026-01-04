@@ -327,6 +327,8 @@ def _dump_single_symbol(
             "open_interest",
             "factor",
             "adjclose",
+            "roll_count",
+            "roll_flag",
         ]
         bt_df = daily_df.loc[:, [c for c in bt_cols if c in daily_df.columns]]
         bt_df = bt_df[~((bt_df["volume"] == 0) & (bt_df["amount"] == 0))]

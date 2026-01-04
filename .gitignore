@@ -81,6 +81,8 @@ qlib/dist/
 # Large downloaded/derived data folders in this repo
 qlib_bin/
 futures/data/raw_data/
+futures/data/qlib_data/
+futures/data/qlib_bin/
 rqdata/Data/
 rqdata/Log/
 rqdata/dump_qlib/
@@ -94,6 +96,7 @@ MASTER/Master_results/
 MASTER/out_features/
 MASTER/model/
 MASTER/data/daily_predict/
+MASTER/backup-prg/predictions_xue/
 
 # Generated prediction csvs in MASTER root
 MASTER/master_predictions*.csv

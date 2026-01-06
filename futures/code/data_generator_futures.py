@@ -9,13 +9,26 @@ This script does NOT train a model; it just checks that qlib can:
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 import yaml
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Sanity check for FuturesAlpha158 + DatasetH")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=str(Path(__file__).resolve().parents[1] / "workflow_config_futures_Alpha158.yaml"),
+        help="Path to workflow config yaml",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     # Ensure local qlib is importable (repo has qlib source under /home/idc2/notebook/qlib)
     sys.path.insert(0, "/home/idc2/notebook/qlib")
     # Ensure repo root is importable so `module_path: futures.*` works
@@ -25,7 +38,7 @@ def main():
     import qlib
     from qlib.utils import init_instance_by_config
 
-    cfg_path = Path(__file__).resolve().parents[1] / "workflow_config_futures_Alpha158.yaml"
+    cfg_path = Path(args.config).expanduser().resolve()
     with cfg_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 

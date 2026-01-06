@@ -5,7 +5,7 @@ set -x
 project_dir="/home/idc2/notebook/zxf/code"
 data_dir="/home/idc2/notebook/zxf/data"
 market_name="csi800"
-seed_num=5
+seed_num=2
 today=$(date +%Y%m%d)
 
 ### 激活虚拟环境
@@ -32,9 +32,10 @@ cd "$project_dir"
 #     exit 1
 # fi
 
+
 ### 生成实验主目录
 # folder_name="${market_name}_${today}_${start_date}_${end_date}"
-folder_name="csi800_20260101s_20150101_20251226"
+folder_name="csi800_20260105_f1_20150101_20251231"
 echo "Folder_name:$folder_name"
 
 ### 数据切割

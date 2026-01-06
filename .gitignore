@@ -106,6 +106,9 @@ MASTER/backup-prg/predictions_xue/
 MASTER/master_predictions*.csv
 MASTER/*_single_day_*.csv
 
+# Backtest generated account details csvs (e.g. zxf/code/Backtest/)
+account_details_*.csv
+
 # ========= Archives =========
 *.tar.gz
 *.zip

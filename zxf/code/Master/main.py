@@ -8,6 +8,60 @@ import sys
 import pandas as pd
 import yaml
 import fire
+from pathlib import Path
+import re
+
+
+def _resolve_init_ckpt_path(
+        init_param_path: str = None,
+        init_dir: str = None,
+        init_seed: int = None,
+        init_step: int = None,
+):
+    """
+    Resolve warm-start checkpoint path.
+
+    Priority:
+    1) init_param_path (explicit ckpt file)
+    2) init_dir + init_seed (+ optional init_step) -> pick step max if init_step is None
+    """
+    if init_param_path:
+        ckpt_path = Path(init_param_path)
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"init_param_path not found: {ckpt_path}")
+        return str(ckpt_path)
+
+    if not init_dir:
+        raise ValueError("rolling=True requires init_dir or init_param_path")
+    if init_seed is None:
+        raise ValueError("rolling=True requires init_seed")
+
+    init_dir_path = Path(init_dir)
+    if not init_dir_path.exists():
+        raise FileNotFoundError(f"init_dir not found: {init_dir_path}")
+
+    # filenames like: {universe}_backday_{backday}_self_exp_{seed}_{step}.pkl
+    pattern = re.compile(rf".*_self_exp_{init_seed}_(\d+)\.pkl$")
+    candidates = []
+    for f in init_dir_path.glob(f"*self_exp_{init_seed}_*.pkl"):
+        m = pattern.match(f.name)
+        if not m:
+            continue
+        step = int(m.group(1))
+        if init_step is not None and step != int(init_step):
+            continue
+        candidates.append((step, f))
+
+    if not candidates:
+        extra = f" with init_step={init_step}" if init_step is not None else ""
+        raise FileNotFoundError(
+            f"No checkpoint matched in init_dir={init_dir_path} for init_seed={init_seed}{extra}"
+        )
+
+    # choose max step by default
+    step, ckpt = max(candidates, key=lambda x: x[0])
+    print(f"[rolling] resolved init ckpt: seed={init_seed}, step={step}, path={ckpt}")
+    return str(ckpt)
 
 
 def main(
@@ -15,6 +69,14 @@ def main(
         market_name: str="csi800",
         folder_name: str="csi800_20251105_20150101_20251103",
         seed_num: int= None,
+        seed: int = None,
+        use_fixed_seeds: bool = True,
+        fixed_seed_list: str = "67,80",
+        rolling: bool = False,
+        init_param_path: str = None,
+        init_dir: str = None,
+        init_seed: int = None,
+        init_step: int = None,
         data_path: str=f"/home/idc2/notebook/zxf/data",
 ):
     experimental_data_path = f"{data_path}/master_results/{folder_name}"
@@ -79,9 +141,35 @@ def main(
     seed_list = []
 
     # 随机生成种子
-    rng = random.Random(int(time.time()))
-    seed_number_list = rng.sample(range(0, 100), seed_num)
-    seed_number_list = [67, 80]
+    if rolling:
+        if init_seed is None:
+            raise ValueError("rolling=True requires init_seed (manually selected best seed).")
+        seed_number_list = [int(init_seed)]
+        ckpt_path = _resolve_init_ckpt_path(
+            init_param_path=init_param_path,
+            init_dir=init_dir,
+            init_seed=int(init_seed),
+            init_step=init_step,
+        )
+        # Warn if output dir equals init dir (risk of overwrite)
+        if init_dir and os.path.abspath(init_dir) == os.path.abspath(save_path):
+            print("[rolling][warn] init_dir is the same as current save_path; checkpoints may be overwritten.")
+    else:
+        if seed is not None:
+            seed_number_list = [int(seed)]
+        elif use_fixed_seeds:
+            # Backward-compatible default behavior: use fixed seeds (previously hard-coded)
+            fixed_seeds = [int(x.strip()) for x in str(fixed_seed_list).split(",") if x.strip() != ""]
+            if not fixed_seeds:
+                raise ValueError("use_fixed_seeds=True but fixed_seed_list is empty.")
+            if seed_num is not None and seed_num > 0:
+                # keep behavior stable while allowing smaller seed_num
+                seed_number_list = fixed_seeds[:int(seed_num)]
+            else:
+                seed_number_list = fixed_seeds
+        else:
+            rng = random.Random(int(time.time()))
+            seed_number_list = rng.sample(range(0, 100), seed_num)
     
     print(f"Seed List:{seed_number_list}")
     
@@ -95,6 +183,9 @@ def main(
             save_path=save_path, save_prefix=f'{universe}_backday_{backday}_self_exp_{seed}',
             enable_rank_loss=enable_rank_loss
         )
+        if rolling:
+            print(f"[rolling] loading init params from: {ckpt_path}")
+            model.load_param(ckpt_path)
         start = time.time()
 
         # Train

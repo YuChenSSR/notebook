@@ -198,8 +198,60 @@ class SequenceModel():
         data_loader = DataLoader(data, sampler=sampler, drop_last=drop_last)
         return data_loader
 
-    def load_param(self, param_path):
-        self.model.load_state_dict(torch.load(param_path, map_location=self.device))
+    def load_param(self, param_path, strict: bool = True):
+        """
+        Load model parameters.
+
+        Notes:
+        - Supports some legacy checkpoints where keys are prefixed with `layers.*`
+          (mapped to current `encoder.*` / `decoder.*`).
+        """
+        state = torch.load(param_path, map_location=self.device)
+
+        # common checkpoint wrapper
+        if isinstance(state, dict) and "state_dict" in state and isinstance(state["state_dict"], dict):
+            state = state["state_dict"]
+
+        if not isinstance(state, dict):
+            raise ValueError(f"Invalid checkpoint format: {param_path}")
+
+        # remove DataParallel prefix if exists
+        if any(k.startswith("module.") for k in state.keys()):
+            state = {k[len("module."):]: v for k, v in state.items()}
+
+        # legacy key mapping: layers.* -> encoder/decoder.*
+        if any(k.startswith("layers.") for k in state.keys()):
+            def _map_legacy_key(k: str) -> str:
+                if not k.startswith("layers."):
+                    return k
+                if k.startswith("layers.0."):
+                    return "encoder.0." + k[len("layers.0."):]
+                if k.startswith("layers.1."):
+                    return "encoder.1." + k[len("layers.1."):]
+                if k.startswith("layers.2."):
+                    return "encoder.2." + k[len("layers.2."):]
+                if k.startswith("layers.3."):
+                    return "encoder.3." + k[len("layers.3."):]
+                if k.startswith("layers.4."):
+                    return "encoder.4." + k[len("layers.4."):]
+                if k.startswith("layers.5."):
+                    return "decoder." + k[len("layers.5."):]
+                return k
+
+            state = {_map_legacy_key(k): v for k, v in state.items()}
+            print("[load_param] legacy key mapping applied: layers.* -> encoder/decoder.*")
+
+        try:
+            incompatible = self.model.load_state_dict(state, strict=strict)
+            if (getattr(incompatible, "missing_keys", None) or getattr(incompatible, "unexpected_keys", None)):
+                print(f"[load_param] missing_keys={incompatible.missing_keys}, unexpected_keys={incompatible.unexpected_keys}")
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Load param failed: {param_path}\n"
+                f"Common causes: d_feat/backday/model arch mismatch between ckpt and current config.\n"
+                f"Original error: {str(e)}"
+            ) from e
+
         self.fitted = 'Previously trained.'
 
     def fit(self, dl_train, dl_valid=None):

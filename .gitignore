@@ -105,6 +105,7 @@ MASTER/backup-prg/predictions_xue/
 # Generated prediction csvs in MASTER root
 MASTER/master_predictions*.csv
 MASTER/*_single_day_*.csv
+MASTER/data/csi800_features_data.csv
 
 # Backtest generated account details csvs (e.g. zxf/code/Backtest/)
 account_details_*.csv

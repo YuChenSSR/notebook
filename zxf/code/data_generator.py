@@ -26,10 +26,10 @@ from qlib.tests.data import GetData
 from qlib.data.dataset.handler import DataHandlerLP
 
 def data_generator(
-        market_name: str="csi800b",
+        market_name: str="csi800",
         qlib_path: str="/home/idc2/notebook/qlib_bin/cn_data_train",
         data_path: str="/home/idc2/notebook/zxf/data",
-        folder_name: str="csi800_20251127_data",
+        folder_name: str="csi800_20260106_20150101_20260106",
 ):
 
     qlib.init(provider_uri=qlib_path, region=REG_CN)
@@ -49,18 +49,21 @@ def data_generator(
     if not h_path.exists():
         h = init_instance_by_config(h_conf)
         h.to_pickle(h_path, dump_all=True)
-        # print('Save preprocessed data to', h_path)
+        del h
 
     config["task"]["dataset"]["kwargs"]["handler"] = f"file://{h_path}"
     dataset = init_instance_by_config(config['task']["dataset"])
     dl_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-    dl_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
-    dl_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_I)
-
     with open(f'{save_path}/{market_name}_self_dl_train.pkl', 'wb') as file: pickle.dump(dl_train, file)
+    del dl_train
+    
+    dl_valid = dataset.prepare("valid", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
     with open(f'{save_path}/{market_name}_self_dl_valid.pkl', 'wb') as file: pickle.dump(dl_valid, file)
+    del dl_valid
+    
+    dl_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_I)
     with open(f'{save_path}/{market_name}_self_dl_test.pkl', 'wb') as file: pickle.dump(dl_test, file)
-
+    del dl_test
 
 if __name__ == "__main__":
     fire.Fire(data_generator)

@@ -1,7 +1,7 @@
 import pickle
 import numpy as np
 import pandas as pd
-data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260105_f6_20150101_20251231"
+data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260107_f8_20150101_20251231"
 
 
 

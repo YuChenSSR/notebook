@@ -778,8 +778,8 @@ class Backtest:
 
 def main():
     backtest = Backtest(
-        top_k=10,
-        n_drop=1,
+        top_k=30,
+        n_drop=3,
         hold_p=5,
         account=100_000_000,
         buy_cost_rate=0.0015,
@@ -791,8 +791,8 @@ def main():
         take_profit_ratio=1,
         market_name="csi800",
         printing_info=False,
-        pred_filename="/home/idc2/notebook/zxf/data/master_results/csi800_20260105_f1_20150101_20251231/Backtest_Results/predictions/master_predictions_backday_8_csi800_80_29.csv",
-        backtest_start_date="2025-09-01",
+        pred_filename="/home/idc2/notebook/zxf/data/master_results/csi800_20260107_f8_20150101_20251231/Backtest_Results_256/predictions/master_predictions_backday_8_csi800_91_32.csv",
+        # backtest_start_date="2025-09-01",
     )
     backtest.run()
 

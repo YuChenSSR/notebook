@@ -14,7 +14,7 @@ set -x
 #
 # 重要提醒：
 # - 每一轮必须用新的 folder_name（避免覆盖/污染旧 ckpt）
-# - 你们当前实现是 warm-start（只加载权重），不是断点续训（不会恢复 optimizer 状态）
+# - 当前实现是 warm-start（只加载权重），不是断点续训（不会恢复 optimizer 状态）
 ###############################################################################
 
 ### 路径与环境
@@ -46,8 +46,13 @@ init_seed=67
 init_dir="/home/idc2/notebook/zxf/data/master_results/csi800_20260105_f1_20150101_20251231/Master_results"
 init_step="28"                 # 可留空：默认取该 seed 的最大 step
 
+### 数据生成使用的基准配置（强烈建议与 warm-start ckpt 的实验一致）
+# 如果留空，脚本会自动尝试从 init_dir 的上级目录推断：
+#   <A_folder>/workflow_config_master_Alpha158_${market_name}.yaml
+config_path=""
+
 ### 每轮增量训练的超参（建议小步快跑）
-n_epochs_override="3"           # 每轮只训练 1~5 个 epoch（视数据增量大小而定）
+n_epochs_override="5"           # 每轮只训练 1~5 个 epoch（视数据增量大小而定）
 lr_override="0.0000012"         # 通常比原 lr 小 5~10 倍更稳
 train_stop_loss_thred_override=""   # 可留空：使用 yaml 默认
 strict_load="True"              # 建议保持 True：特征/结构不一致时直接报错
@@ -56,6 +61,11 @@ strict_load="True"              # 建议保持 True：特征/结构不一致时�
 # - last：每轮使用上一轮的最大 step（默认行为；不传 init_step 即可）
 # - best_valid_ic：每轮训练后从 train_metrics_results.csv 选 Valid_IC 最大的 step 作为下一轮 init_step
 init_step_mode="best_valid_ic"
+
+### 数据复用（避免重复生成导致 OOM）
+# 如果某轮的日期段和已有实验目录完全一致，直接复制其 dl_*.pkl，跳过 data_generator
+# 设置为 A 实验的目录（roll=0 通常和 A 日期段相同）
+reuse_data_dir="/home/idc2/notebook/zxf/data/master_results/csi800_20260105_f1_20150101_20251231"
 
 
 date_add_days() {
@@ -100,6 +110,19 @@ if [ ! -d "$init_dir" ]; then
   exit 1
 fi
 
+if [ -z "$config_path" ]; then
+  inferred_cfg="$(dirname "$init_dir")/workflow_config_master_Alpha158_${market_name}.yaml"
+  if [ -f "$inferred_cfg" ]; then
+    config_path="$inferred_cfg"
+    echo "[roll] inferred config_path=${config_path}"
+  fi
+fi
+if [ -z "$config_path" ] || [ ! -f "$config_path" ]; then
+  echo "[error] config_path not found. 请设置脚本顶部的 config_path 指向 A 实验的 workflow_config yaml。"
+  echo "        expected: $(dirname "$init_dir")/workflow_config_master_Alpha158_${market_name}.yaml"
+  exit 1
+fi
+
 prev_init_dir="$init_dir"
 prev_init_step="$init_step"
 
@@ -134,15 +157,60 @@ for ((i=0; i<roll_count; i++)); do
   echo "[roll] init_seed=${init_seed} init_dir=${prev_init_dir} init_step=${prev_init_step}"
 
   ### 1) 生成本轮数据（写入本轮目录的 workflow_config + dl_*.pkl）
-  cd "$project_dir"
-  python3 data_generator.py \
-    --market_name="$market_name" \
-    --qlib_path="$qlib_path" \
-    --data_path="$data_dir" \
-    --folder_name="$folder_name" \
-    --train_start="$train_start" --train_end="$train_end" \
-    --valid_start="$valid_start" --valid_end="$valid_end" \
-    --test_start="$test_start" --test_end="$test_end"
+  cur_save_path="${data_dir}/master_results/${folder_name}"
+  mkdir -p "$cur_save_path"
+
+  # 检查是否可以复用已有数据（日期段完全相同时跳过重新生成）
+  data_reused="false"
+  if [ -n "$reuse_data_dir" ] && [ -d "$reuse_data_dir" ]; then
+    # 检查 reuse_data_dir 里是否有完整的 dl_*.pkl
+    if [ -f "${reuse_data_dir}/${market_name}_self_dl_train.pkl" ] && \
+       [ -f "${reuse_data_dir}/${market_name}_self_dl_valid.pkl" ] && \
+       [ -f "${reuse_data_dir}/${market_name}_self_dl_test.pkl" ]; then
+      # 检查日期段是否匹配（从 workflow_config 里读）
+      reuse_cfg="${reuse_data_dir}/workflow_config_master_Alpha158_${market_name}.yaml"
+      if [ -f "$reuse_cfg" ]; then
+        match_result=$(python3 - <<PY
+import yaml
+with open("${reuse_cfg}", "r") as f:
+    cfg = yaml.safe_load(f)
+seg = cfg.get("task", {}).get("dataset", {}).get("kwargs", {}).get("segments", {})
+def to_str(d):
+    if hasattr(d, "strftime"):
+        return d.strftime("%Y-%m-%d")
+    return str(d)[:10]
+train_match = to_str(seg.get("train", [None, None])[0]) == "${train_start}" and to_str(seg.get("train", [None, None])[1]) == "${train_end}"
+valid_match = to_str(seg.get("valid", [None, None])[0]) == "${valid_start}" and to_str(seg.get("valid", [None, None])[1]) == "${valid_end}"
+test_match = to_str(seg.get("test", [None, None])[0]) == "${test_start}" and to_str(seg.get("test", [None, None])[1]) == "${test_end}"
+print("match" if (train_match and valid_match and test_match) else "no_match")
+PY
+)
+        if [ "$match_result" = "match" ]; then
+          echo "[roll] reuse data from ${reuse_data_dir} (date segments match)"
+          cp "${reuse_data_dir}/${market_name}_self_dl_train.pkl" "${cur_save_path}/"
+          cp "${reuse_data_dir}/${market_name}_self_dl_valid.pkl" "${cur_save_path}/"
+          cp "${reuse_data_dir}/${market_name}_self_dl_test.pkl" "${cur_save_path}/"
+          cp "${reuse_data_dir}/workflow_config_master_Alpha158_${market_name}.yaml" "${cur_save_path}/"
+          data_reused="true"
+        fi
+      fi
+    fi
+  fi
+
+  if [ "$data_reused" = "false" ]; then
+    echo "[roll] generating new data (no reusable data found or date mismatch)"
+    cd "$project_dir"
+    python3 data_generator.py \
+      --market_name="$market_name" \
+      --qlib_path="$qlib_path" \
+      --data_path="$data_dir" \
+      --folder_name="$folder_name" \
+      --config_path="$config_path" \
+      --handler_dump_all=False \
+      --train_start="$train_start" --train_end="$train_end" \
+      --valid_start="$valid_start" --valid_end="$valid_end" \
+      --test_start="$test_start" --test_end="$test_end"
+  fi
 
   ### 2) 训练（rolling=True，从上一轮 ckpt warm-start）
   cd "$project_dir/Master"

@@ -101,6 +101,7 @@ MASTER/out_features/
 MASTER/model/
 MASTER/data/daily_predict/
 MASTER/backup-prg/predictions_xue/
+MASTER/data/csi800_features_data.csv
 
 # Generated prediction csvs in MASTER root
 MASTER/master_predictions*.csv

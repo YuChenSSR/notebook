@@ -8,6 +8,21 @@ market_name="csi800"
 seed_num=1
 today=$(date +%Y%m%d)
 
+### GPU/性能优化（可选，不填则使用默认/配置文件）
+# 提示：如果你想强制指定某张卡，推荐用 CUDA_VISIBLE_DEVICES + YAML 里 GPU=0 的组合。
+cuda_visible_devices=""    # 例如 "0" 或 "1" 或 "0,1"；留空则不设置
+# 说明：
+# - “默认可复现 + 提速”：保持 deterministic=True，AMP/TF32 默认不开（避免改变数值精度），但打开 DataLoader 并行与 pin_memory
+# - 如需进一步提速（允许数值有轻微变化但仍可复现）：再手动设置 tf32=True / amp=True
+amp=""                     # True / False；默认留空（不改数值精度）
+amp_dtype=""               # bf16 / fp16；默认留空
+tf32=""                    # True / False；默认留空（TF32 会改变数值精度）
+deterministic="True"       # True / False；默认 True（更可复现）
+num_workers="4"            # 0=单进程；默认 4（一般能显著减少喂数瓶颈）
+pin_memory="True"          # True / False；默认 True（GPU 训练建议开启）
+persistent_workers="True"  # True / False；默认 True（num_workers>0 时有效）
+prefetch_factor="2"        # 默认 2（num_workers>0 时有效）
+
 ### 是否重新生成实验数据（原脚本默认不切数据，这里保持兼容）
 gen_data="False"        # True / False
 
@@ -44,6 +59,13 @@ strict_load="True"                   # True / False（建议保持 True，避免
 cd "$project_dir"
 source /opt/anaconda3/etc/profile.d/conda.sh
 conda activate pytorch
+
+### 可选：绑定可见 GPU（不改变 YAML 里的 GPU 序号语义）
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+if [ -n "$cuda_visible_devices" ]; then
+    export CUDA_VISIBLE_DEVICES="$cuda_visible_devices"
+    echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+fi
 
 ### 读取workflow_config参数
 cd "$project_dir"
@@ -135,7 +157,18 @@ else
     fi
 fi
 
-python3 main.py --market_name="$market_name" --folder_name="$folder_name" --seed_num="$seed_num" --data_path="$data_dir" $extra_args
+# 追加性能参数（仅在变量非空时覆盖）
+if [ -n "$amp" ]; then extra_args="${extra_args} --amp=${amp}"; fi
+if [ -n "$amp_dtype" ]; then extra_args="${extra_args} --amp_dtype=${amp_dtype}"; fi
+if [ -n "$tf32" ]; then extra_args="${extra_args} --tf32=${tf32}"; fi
+if [ -n "$deterministic" ]; then extra_args="${extra_args} --deterministic=${deterministic}"; fi
+if [ -n "$num_workers" ]; then extra_args="${extra_args} --num_workers=${num_workers}"; fi
+if [ -n "$pin_memory" ]; then extra_args="${extra_args} --pin_memory=${pin_memory}"; fi
+if [ -n "$persistent_workers" ]; then extra_args="${extra_args} --persistent_workers=${persistent_workers}"; fi
+if [ -n "$prefetch_factor" ]; then extra_args="${extra_args} --prefetch_factor=${prefetch_factor}"; fi
+
+# -u/UNBUFFERED：确保 Python 输出实时刷出（避免“看不到任何结果但其实在跑”）
+PYTHONUNBUFFERED=1 python3 -u main.py --market_name="$market_name" --folder_name="$folder_name" --seed_num="$seed_num" --data_path="$data_dir" $extra_args
 
 # ### 生成预测值
 # cd "$project_dir/Backtest"

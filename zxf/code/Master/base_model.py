@@ -7,6 +7,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
 import torch
 import torch.optim as optim
+from contextlib import nullcontext
+from functools import partial
 
 
 def calc_ic(pred, label):
@@ -48,6 +50,16 @@ def drop_na(x):
     mask = ~x.isnan()
     return mask, x[mask]
 
+def _seed_worker(worker_id: int, base_seed: int = None):
+    """
+    DataLoader worker 初始化随机种子，保证 num_workers>0 时也可复现。
+    """
+    if base_seed is None:
+        return
+    s = int(base_seed) + int(worker_id)
+    np.random.seed(s)
+    torch.manual_seed(s)
+
 
 class DailyBatchSamplerRandom(Sampler):
     def __init__(self, data_source, shuffle=False):
@@ -74,19 +86,91 @@ class DailyBatchSamplerRandom(Sampler):
 
 
 class SequenceModel():
-    def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path='model/',
-                 save_prefix='', enable_rank_loss=False):
+    def __init__(
+            self,
+            n_epochs,
+            lr,
+            GPU=None,
+            seed=None,
+            train_stop_loss_thred=None,
+            save_path='model/',
+            save_prefix='',
+            enable_rank_loss=False,
+            # DataLoader 性能参数（默认保持旧行为）
+            num_workers: int = 0,
+            pin_memory: bool = False,
+            persistent_workers: bool = False,
+            prefetch_factor: int = 2,
+            # CUDA 计算性能参数（默认保持旧行为）
+            amp: bool = False,
+            amp_dtype: str = "bf16",   # "bf16" / "fp16"
+            tf32: bool = False,
+            deterministic: bool = True,
+    ):
         self.n_epochs = n_epochs
         self.lr = lr
         self.device = torch.device(f"cuda:{GPU}" if torch.cuda.is_available() else "cpu")
         self.seed = seed
         self.train_stop_loss_thred = train_stop_loss_thred
 
+        # DataLoader 参数
+        self.num_workers = max(0, int(num_workers)) if num_workers is not None else 0
+        # pin_memory 只有在 CUDA 下才有意义
+        self.pin_memory = bool(pin_memory) and (self.device.type == "cuda")
+        self.persistent_workers = bool(persistent_workers) and (self.num_workers > 0)
+        self.prefetch_factor = int(prefetch_factor) if (prefetch_factor is not None) else None
+
+        # CUDA 性能参数
+        self.deterministic = bool(deterministic)
+        self.tf32 = bool(tf32) and (self.device.type == "cuda")
+        self.amp_enabled = bool(amp) and (self.device.type == "cuda")
+        self.amp_dtype = self._resolve_amp_dtype(amp_dtype)
+
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
-            torch.cuda.manual_seed_all(self.seed)
-            torch.backends.cudnn.deterministic = True
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.seed)
+
+        # 训练可复现 vs 性能：默认保持旧行为（seed 存在且 deterministic=True 时，走确定性）
+        if self.device.type == "cuda":
+            if self.deterministic and (self.seed is not None):
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+            else:
+                # 非确定性允许 benchmark，通常更快
+                torch.backends.cudnn.deterministic = False
+                torch.backends.cudnn.benchmark = True
+
+            # TF32：对 Ampere+ 的 GEMM/conv 通常能显著提速，精度略有折中
+            if self.tf32:
+                try:
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    # PyTorch 2.x 推荐接口
+                    if hasattr(torch, "set_float32_matmul_precision"):
+                        torch.set_float32_matmul_precision("high")
+                except Exception:
+                    pass
+
+        # AMP：优先 bf16（避免 fp16 下 log/sigmoid 的数值问题）
+        if self.amp_enabled and (self.amp_dtype == torch.bfloat16) and self.device.type == "cuda":
+            # 旧版 torch 可能没有 is_bf16_supported；不影响运行，失败则继续尝试
+            try:
+                if hasattr(torch.cuda, "is_bf16_supported") and (not torch.cuda.is_bf16_supported()):
+                    # 回退 fp16
+                    self.amp_dtype = torch.float16
+            except Exception:
+                pass
+
+        self.scaler = None
+        if self.amp_enabled and (self.amp_dtype == torch.float16) and self.device.type == "cuda":
+            # GradScaler 仅对 fp16 必要
+            try:
+                self.scaler = torch.cuda.amp.GradScaler(enabled=True)
+            except Exception:
+                self.scaler = None
+
         self.fitted = -1
 
         self.model = None
@@ -104,7 +188,26 @@ class SequenceModel():
         self.train_optimizer = optim.Adam(self.model.parameters(), self.lr)
         self.model.to(self.device)
 
+    @staticmethod
+    def _resolve_amp_dtype(amp_dtype: str):
+        s = str(amp_dtype).strip().lower() if amp_dtype is not None else ""
+        if s in ("bf16", "bfloat16"):
+            return torch.bfloat16
+        if s in ("fp16", "float16", "half", "16"):
+            return torch.float16
+        # 其它情况：不启用 autocast dtype 选择，仍可通过 amp=False 关闭
+        return torch.bfloat16
+
+    def _autocast_ctx(self):
+        if self.amp_enabled and (self.device.type == "cuda"):
+            return torch.cuda.amp.autocast(enabled=True, dtype=self.amp_dtype)
+        return nullcontext()
+
     def loss_fn(self, pred, label, rank_loss_ratio=0.01, topk_loss_ratio=0.01, topk_ratio=0.15):
+        # AMP 下 pred 可能是 fp16/bf16；loss/排序相关计算建议用 fp32 保证数值稳定
+        pred = pred.float()
+        label = label.float()
+
         mask = ~torch.isnan(label)
         loss = torch.mean((pred[mask] - label[mask]) ** 2)
 
@@ -117,6 +220,7 @@ class SequenceModel():
             S_pair = S[mask_upper]
             D_pair = diff_pred[mask_upper]
 
+            # 注意：fp16 下 1e-12 会下溢为 0，导致 -inf；这里已确保 fp32
             rank_loss = - torch.log(torch.sigmoid(S_pair * D_pair) + 1e-12).mean()
 
             loss += rank_loss_ratio * rank_loss
@@ -128,6 +232,7 @@ class SequenceModel():
             G = idx[:k]  # 正例
             B = idx[k:]  # 负例
 
+            topk_loss = torch.tensor(0.0, device=pred.device)
             if len(G) > 0 and len(B) > 0:
                 pG = pred[G].unsqueeze(1)  # [k, 1]
                 pB = pred[B].unsqueeze(0)  # [1, N-k]
@@ -150,8 +255,13 @@ class SequenceModel():
             T - length of lookback_window, 8
             F - 158/360 factors + 63 market information + 1 label           
             '''
-            feature = data[:, :, 0:-1].to(self.device)
-            label = data[:, -1, -1].to(self.device)
+            # 传输优化：pin_memory + non_blocking 可以提升 H2D 吞吐
+            if self.device.type == "cuda":
+                feature = data[:, :, 0:-1].to(self.device, non_blocking=self.pin_memory)
+                label = data[:, -1, -1].to(self.device, non_blocking=self.pin_memory)
+            else:
+                feature = data[:, :, 0:-1].to(self.device)
+                label = data[:, -1, -1].to(self.device)
 
             # Additional process on labels
             # If you use original data to train, you won't need the following lines because we already drop extreme when we dumped the data.
@@ -162,14 +272,22 @@ class SequenceModel():
             label = zscore(label)  # CSZscoreNorm
             #########################
 
-            pred = self.model(feature.float())
-            loss = self.loss_fn(pred, label)
+            self.train_optimizer.zero_grad(set_to_none=True)
+            with self._autocast_ctx():
+                pred = self.model(feature.float())
+                loss = self.loss_fn(pred, label)
             losses.append(loss.item())
 
-            self.train_optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
-            self.train_optimizer.step()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.train_optimizer)
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
+                self.scaler.step(self.train_optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
+                self.train_optimizer.step()
 
         losses = [x for x in losses if not math.isnan(x)]
         # print(losses)
@@ -181,21 +299,56 @@ class SequenceModel():
 
         for data in data_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
-            label = data[:, -1, -1].to(self.device)
+            if self.device.type == "cuda":
+                feature = data[:, :, 0:-1].to(self.device, non_blocking=self.pin_memory)
+                label = data[:, -1, -1].to(self.device, non_blocking=self.pin_memory)
+            else:
+                feature = data[:, :, 0:-1].to(self.device)
+                label = data[:, -1, -1].to(self.device)
 
             # You cannot drop extreme labels for test.
             label = zscore(label)
 
-            pred = self.model(feature.float())
-            loss = self.loss_fn(pred, label)
+            with torch.no_grad():
+                with self._autocast_ctx():
+                    pred = self.model(feature.float())
+                    loss = self.loss_fn(pred, label)
             losses.append(loss.item())
 
         return float(np.mean(losses))
 
     def _init_data_loader(self, data, shuffle=True, drop_last=True):
         sampler = DailyBatchSamplerRandom(data, shuffle)
-        data_loader = DataLoader(data, sampler=sampler, drop_last=drop_last)
+        kwargs = dict(
+            sampler=sampler,
+            drop_last=drop_last,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+        )
+        # 多进程可复现：固定 worker seed + generator
+        if self.seed is not None:
+            try:
+                kwargs["worker_init_fn"] = partial(_seed_worker, base_seed=int(self.seed))
+            except Exception:
+                pass
+            try:
+                g = torch.Generator()
+                g.manual_seed(int(self.seed))
+                kwargs["generator"] = g
+            except Exception:
+                pass
+        if self.num_workers > 0:
+            kwargs["persistent_workers"] = self.persistent_workers
+            if self.prefetch_factor is not None:
+                kwargs["prefetch_factor"] = self.prefetch_factor
+        try:
+            data_loader = DataLoader(data, **kwargs)
+        except TypeError:
+            # 兼容旧版 torch：某些参数可能不存在
+            kwargs.pop("persistent_workers", None)
+            kwargs.pop("prefetch_factor", None)
+            kwargs.pop("generator", None)
+            data_loader = DataLoader(data, **kwargs)
         return data_loader
 
     def load_param(self, param_path, strict: bool = True):
@@ -262,6 +415,8 @@ class SequenceModel():
 
         process_info = pd.DataFrame([])     # 过程信息
         for step in range(self.n_epochs):
+            # 先打印“epoch 开始”，避免一个 epoch 很久导致看起来像没输出
+            print(f"Seed {self.seed}, Epoch {step} start...", flush=True)
             train_loss = self.train_epoch(train_loader)
             self.fitted = step
             if dl_valid:
@@ -302,9 +457,13 @@ class SequenceModel():
         self.model.eval()
         for data in test_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
+            if self.device.type == "cuda":
+                feature = data[:, :, 0:-1].to(self.device, non_blocking=self.pin_memory)
+            else:
+                feature = data[:, :, 0:-1].to(self.device)
             with torch.no_grad():
-                enc = self.model.encode(feature.float()).detach().cpu().numpy()
+                with self._autocast_ctx():
+                    enc = self.model.encode(feature.float()).float().detach().cpu().numpy()
             encs.append(enc)
         out = pd.DataFrame(
             np.concatenate(encs),
@@ -329,14 +488,18 @@ class SequenceModel():
         self.model.eval()
         for data in test_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
+            if self.device.type == "cuda":
+                feature = data[:, :, 0:-1].to(self.device, non_blocking=self.pin_memory)
+            else:
+                feature = data[:, :, 0:-1].to(self.device)
             label = data[:, -1, -1]
 
             # nan label will be automatically ignored when compute metrics.
             # zscorenorm will not affect the results of ranking-based metrics.
 
             with torch.no_grad():
-                pred = self.model(feature.float()).detach().cpu().numpy()
+                with self._autocast_ctx():
+                    pred = self.model(feature.float()).float().detach().cpu().numpy()
             preds.append(pred.ravel())
 
             daily_ic, daily_ric = calc_ic(pred, label.detach().numpy())

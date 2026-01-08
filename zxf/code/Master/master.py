@@ -40,10 +40,9 @@ class SAttention(nn.Module):
         self.ktrans = nn.Linear(d_model, d_model, bias=False)
         self.vtrans = nn.Linear(d_model, d_model, bias=False)
 
-        attn_dropout_layer = []
-        for i in range(nhead):
-            attn_dropout_layer.append(Dropout(p=dropout))
-        self.attn_dropout = nn.ModuleList(attn_dropout_layer)
+        # 原实现为逐 head dropout（ModuleList），但计算上没有必要；这里用一次性 Dropout，
+        # 同分布、显著减少 Python 循环带来的 kernel 碎片化。
+        self.attn_dropout = Dropout(p=dropout) if dropout and dropout > 0 else None
 
         # input LayerNorm
         self.norm1 = LayerNorm(d_model, eps=1e-5)
@@ -60,27 +59,44 @@ class SAttention(nn.Module):
 
     def forward(self, x):
         x = self.norm1(x)
-        q = self.qtrans(x).transpose(0,1)
-        k = self.ktrans(x).transpose(0,1)
-        v = self.vtrans(x).transpose(0,1)
+        q = self.qtrans(x).transpose(0, 1)   # [T, N, D]
+        k = self.ktrans(x).transpose(0, 1)   # [T, N, D]
+        v = self.vtrans(x).transpose(0, 1)   # [T, N, D]
 
-        dim = int(self.d_model/self.nhead)
-        att_output = []
-        for i in range(self.nhead):
-            if i==self.nhead-1:
-                qh = q[:, :, i * dim:]
-                kh = k[:, :, i * dim:]
-                vh = v[:, :, i * dim:]
-            else:
-                qh = q[:, :, i * dim:(i + 1) * dim]
-                kh = k[:, :, i * dim:(i + 1) * dim]
-                vh = v[:, :, i * dim:(i + 1) * dim]
+        # 向量化 multi-head：一次性 batched matmul，减少 Python 循环与 kernel launch 开销
+        T, N, D = q.shape
+        if D % self.nhead != 0:
+            # 兜底：极少数不整除场景保持旧逻辑（但一般 d_model 可整除 nhead）
+            dim = int(self.d_model / self.nhead)
+            att_output = []
+            for i in range(self.nhead):
+                if i == self.nhead - 1:
+                    qh = q[:, :, i * dim:]
+                    kh = k[:, :, i * dim:]
+                    vh = v[:, :, i * dim:]
+                else:
+                    qh = q[:, :, i * dim:(i + 1) * dim]
+                    kh = k[:, :, i * dim:(i + 1) * dim]
+                    vh = v[:, :, i * dim:(i + 1) * dim]
+                atten = torch.softmax(torch.matmul(qh, kh.transpose(1, 2)) / self.temperature, dim=-1)
+                if self.attn_dropout is not None:
+                    atten = self.attn_dropout(atten)
+                att_output.append(torch.matmul(atten, vh).transpose(0, 1))
+            att_output = torch.concat(att_output, dim=-1)
+        else:
+            hd = D // self.nhead
+            # [T, N, D] -> [T, H, N, hd]
+            qh = q.reshape(T, N, self.nhead, hd).permute(0, 2, 1, 3)
+            kh = k.reshape(T, N, self.nhead, hd).permute(0, 2, 1, 3)
+            vh = v.reshape(T, N, self.nhead, hd).permute(0, 2, 1, 3)
 
-            atten_ave_matrixh = torch.softmax(torch.matmul(qh, kh.transpose(1, 2)) / self.temperature, dim=-1)
-            if self.attn_dropout:
-                atten_ave_matrixh = self.attn_dropout[i](atten_ave_matrixh)
-            att_output.append(torch.matmul(atten_ave_matrixh, vh).transpose(0, 1))
-        att_output = torch.concat(att_output, dim=-1)
+            atten = torch.matmul(qh, kh.transpose(-2, -1)) / self.temperature   # [T, H, N, N]
+            atten = torch.softmax(atten, dim=-1)
+            if self.attn_dropout is not None:
+                atten = self.attn_dropout(atten)
+            out = torch.matmul(atten, vh)  # [T, H, N, hd]
+            # [T, H, N, hd] -> [N, T, D]
+            att_output = out.permute(0, 2, 1, 3).contiguous().reshape(T, N, D).transpose(0, 1)
 
         # FFN
         xt = x + att_output
@@ -99,11 +115,7 @@ class TAttention(nn.Module):
         self.ktrans = nn.Linear(d_model, d_model, bias=False)
         self.vtrans = nn.Linear(d_model, d_model, bias=False)
 
-        self.attn_dropout = []
-        if dropout > 0:
-            for i in range(nhead):
-                self.attn_dropout.append(Dropout(p=dropout))
-            self.attn_dropout = nn.ModuleList(self.attn_dropout)
+        self.attn_dropout = Dropout(p=dropout) if dropout and dropout > 0 else None
 
         # input LayerNorm
         self.norm1 = LayerNorm(d_model, eps=1e-5)
@@ -124,22 +136,39 @@ class TAttention(nn.Module):
         k = self.ktrans(x)
         v = self.vtrans(x)
 
-        dim = int(self.d_model / self.nhead)
-        att_output = []
-        for i in range(self.nhead):
-            if i==self.nhead-1:
-                qh = q[:, :, i * dim:]
-                kh = k[:, :, i * dim:]
-                vh = v[:, :, i * dim:]
-            else:
-                qh = q[:, :, i * dim:(i + 1) * dim]
-                kh = k[:, :, i * dim:(i + 1) * dim]
-                vh = v[:, :, i * dim:(i + 1) * dim]
-            atten_ave_matrixh = torch.softmax(torch.matmul(qh, kh.transpose(1, 2)), dim=-1)
-            if self.attn_dropout:
-                atten_ave_matrixh = self.attn_dropout[i](atten_ave_matrixh)
-            att_output.append(torch.matmul(atten_ave_matrixh, vh))
-        att_output = torch.concat(att_output, dim=-1)
+        N, T, D = q.shape
+        if D % self.nhead != 0:
+            # 兜底：保持旧逻辑
+            dim = int(self.d_model / self.nhead)
+            att_output = []
+            for i in range(self.nhead):
+                if i == self.nhead - 1:
+                    qh = q[:, :, i * dim:]
+                    kh = k[:, :, i * dim:]
+                    vh = v[:, :, i * dim:]
+                else:
+                    qh = q[:, :, i * dim:(i + 1) * dim]
+                    kh = k[:, :, i * dim:(i + 1) * dim]
+                    vh = v[:, :, i * dim:(i + 1) * dim]
+                atten = torch.softmax(torch.matmul(qh, kh.transpose(1, 2)), dim=-1)
+                if self.attn_dropout is not None:
+                    atten = self.attn_dropout(atten)
+                att_output.append(torch.matmul(atten, vh))
+            att_output = torch.concat(att_output, dim=-1)
+        else:
+            hd = D // self.nhead
+            # [N, T, D] -> [N, H, T, hd]
+            qh = q.reshape(N, T, self.nhead, hd).permute(0, 2, 1, 3)
+            kh = k.reshape(N, T, self.nhead, hd).permute(0, 2, 1, 3)
+            vh = v.reshape(N, T, self.nhead, hd).permute(0, 2, 1, 3)
+
+            # 注意：原实现未做 1/sqrt(d) 缩放，这里保持一致
+            atten = torch.matmul(qh, kh.transpose(-2, -1))   # [N, H, T, T]
+            atten = torch.softmax(atten, dim=-1)
+            if self.attn_dropout is not None:
+                atten = self.attn_dropout(atten)
+            out = torch.matmul(atten, vh)  # [N, H, T, hd]
+            att_output = out.permute(0, 2, 1, 3).contiguous().reshape(N, T, D)
 
         # FFN
         xt = x + att_output

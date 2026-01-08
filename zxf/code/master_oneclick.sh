@@ -5,7 +5,7 @@ set -x
 project_dir="/home/idc2/notebook/zxf/code"
 data_dir="/home/idc2/notebook/zxf/data"
 market_name="csi800"
-seed_num=2
+seed_num=1
 today=$(date +%Y%m%d)
 
 ### 是否重新生成实验数据（原脚本默认不切数据，这里保持兼容）
@@ -15,7 +15,7 @@ gen_data="False"        # True / False
 # A实验：rolling="False" 正常跑多seed
 # B实验：rolling="True"  + 手工选最优 init_seed + 指定 init_dir 或 init_param_path
 rolling="False"         # True / False
-seed=""                 # rolling=False 时可选：只跑一个 seed
+seed="67"                 # rolling=False 时可选：只跑一个 seed
 init_seed=""            # rolling=True 时必填：人工选出的最优 seed
 init_dir=""             # rolling=True 时可选：上次实验的 Master_results 目录
 init_param_path=""      # rolling=True 时可选：直接指定 ckpt 文件路径（优先级更高）
@@ -91,10 +91,10 @@ fi
 
 python3 main.py --market_name="$market_name" --folder_name="$folder_name" --seed_num="$seed_num" --data_path="$data_dir" $extra_args
 
-### 生成预测值
-cd "$project_dir/Backtest"
-python3 processing_prediction_seed_step.py --data_path="$data_dir" --market_name="$market_name" --folder_name="$folder_name"
+# ### 生成预测值
+# cd "$project_dir/Backtest"
+# python3 processing_prediction_seed_step.py --data_path="$data_dir" --market_name="$market_name" --folder_name="$folder_name"
 
-### 回测
-cd "$project_dir/Backtest"
-python3 backtest_seed_step.py --market_name="$market_name" --folder_name="$folder_name"
+# ### 回测
+# cd "$project_dir/Backtest"
+# python3 backtest_seed_step.py --market_name="$market_name" --folder_name="$folder_name"

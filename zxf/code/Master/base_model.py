@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import copy
 import math
+import os
 
 from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
@@ -75,7 +76,8 @@ class DailyBatchSamplerRandom(Sampler):
 
 class SequenceModel():
     def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path='model/',
-                 save_prefix='', enable_rank_loss=False):
+                 save_prefix='', enable_rank_loss=False,
+                 num_workers=None, pin_memory=None, prefetch_factor=None, persistent_workers=None, non_blocking=None):
         self.n_epochs = n_epochs
         self.lr = lr
         self.device = torch.device(f"cuda:{GPU}" if torch.cuda.is_available() else "cpu")
@@ -96,6 +98,40 @@ class SequenceModel():
         self.save_prefix = save_prefix
 
         self.enable_rank_loss = enable_rank_loss
+
+        # DataLoader / H2D pipeline options (不会改变数值结果；仅影响吞吐)
+        def _env_int(name, default):
+            val = os.getenv(name, None)
+            if val is None or val == "":
+                return default
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        def _env_bool(name, default: bool):
+            val = os.getenv(name, None)
+            if val is None or val == "":
+                return default
+            return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+        if num_workers is None:
+            num_workers = _env_int("MASTER_NUM_WORKERS", 0)
+        if pin_memory is None:
+            pin_memory = _env_bool("MASTER_PIN_MEMORY", torch.cuda.is_available())
+        if prefetch_factor is None:
+            prefetch_factor = _env_int("MASTER_PREFETCH_FACTOR", 2)
+        if persistent_workers is None:
+            persistent_workers = _env_bool("MASTER_PERSISTENT_WORKERS", True)
+        if non_blocking is None:
+            non_blocking = _env_bool("MASTER_NON_BLOCKING", True)
+
+        num_workers = max(int(num_workers), 0)
+        self.num_workers = num_workers
+        self.pin_memory = bool(pin_memory) and torch.cuda.is_available()
+        self.prefetch_factor = max(int(prefetch_factor), 1)
+        self.persistent_workers = bool(persistent_workers) if self.num_workers > 0 else False
+        self.non_blocking = bool(non_blocking) and self.pin_memory
 
     def init_model(self):
         if self.model is None:
@@ -150,8 +186,8 @@ class SequenceModel():
             T - length of lookback_window, 8
             F - 158/360 factors + 63 market information + 1 label           
             '''
-            feature = data[:, :, 0:-1].to(self.device)
-            label = data[:, -1, -1].to(self.device)
+            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
+            label = data[:, -1, -1].to(self.device, non_blocking=self.non_blocking)
 
             # Additional process on labels
             # If you use original data to train, you won't need the following lines because we already drop extreme when we dumped the data.
@@ -164,16 +200,23 @@ class SequenceModel():
 
             pred = self.model(feature.float())
             loss = self.loss_fn(pred, label)
-            losses.append(loss.item())
+            losses.append(loss.detach())
 
             self.train_optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
             self.train_optimizer.step()
 
-        losses = [x for x in losses if not math.isnan(x)]
-        # print(losses)
-        return float(np.mean(losses))
+        if len(losses) == 0:
+            return float("nan")
+        losses_t = torch.stack(losses)
+        losses_t = losses_t[~torch.isnan(losses_t)]
+        if losses_t.numel() == 0:
+            return float("nan")
+        # 为了严格复现原实现：原来是逐 batch loss.item()（float64）后用 numpy.mean 做均值。
+        # 这里保持“只在 epoch 末同步一次”，但均值仍用 numpy 的 float64 计算路径。
+        losses_np = losses_t.detach().cpu().numpy().astype(np.float64, copy=False)
+        return float(np.mean(losses_np))
 
     def test_epoch(self, data_loader):
         self.model.eval()
@@ -181,21 +224,39 @@ class SequenceModel():
 
         for data in data_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
-            label = data[:, -1, -1].to(self.device)
+            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
+            label = data[:, -1, -1].to(self.device, non_blocking=self.non_blocking)
 
             # You cannot drop extreme labels for test.
             label = zscore(label)
 
-            pred = self.model(feature.float())
-            loss = self.loss_fn(pred, label)
-            losses.append(loss.item())
+            with torch.inference_mode():
+                pred = self.model(feature.float())
+                loss = self.loss_fn(pred, label)
+            losses.append(loss.detach())
 
-        return float(np.mean(losses))
+        if len(losses) == 0:
+            return float("nan")
+        losses_t = torch.stack(losses)
+        losses_t = losses_t[~torch.isnan(losses_t)]
+        if losses_t.numel() == 0:
+            return float("nan")
+        losses_np = losses_t.detach().cpu().numpy().astype(np.float64, copy=False)
+        return float(np.mean(losses_np))
 
     def _init_data_loader(self, data, shuffle=True, drop_last=True):
         sampler = DailyBatchSamplerRandom(data, shuffle)
-        data_loader = DataLoader(data, sampler=sampler, drop_last=drop_last)
+        # prefetch_factor 仅在 num_workers>0 时生效；否则传入会报错
+        kwargs = dict(
+            sampler=sampler,
+            drop_last=drop_last,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+        )
+        if self.num_workers > 0:
+            kwargs["prefetch_factor"] = self.prefetch_factor
+        data_loader = DataLoader(data, **kwargs)
         return data_loader
 
     def load_param(self, param_path):
@@ -250,8 +311,8 @@ class SequenceModel():
         self.model.eval()
         for data in test_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
-            with torch.no_grad():
+            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
+            with torch.inference_mode():
                 enc = self.model.encode(feature.float()).detach().cpu().numpy()
             encs.append(enc)
         out = pd.DataFrame(
@@ -277,13 +338,13 @@ class SequenceModel():
         self.model.eval()
         for data in test_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device)
+            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
             label = data[:, -1, -1]
 
             # nan label will be automatically ignored when compute metrics.
             # zscorenorm will not affect the results of ranking-based metrics.
 
-            with torch.no_grad():
+            with torch.inference_mode():
                 pred = self.model(feature.float()).detach().cpu().numpy()
             preds.append(pred.ravel())
 

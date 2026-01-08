@@ -77,6 +77,11 @@ def main(
         init_dir: str = None,
         init_seed: int = None,
         init_step: int = None,
+        # 增量训练常用覆盖：rolling 时一般只跑少量 epoch / 更小 lr
+        n_epochs_override: int = None,
+        lr_override: float = None,
+        train_stop_loss_thred_override: float = None,
+        strict_load: bool = True,
         data_path: str=f"/home/idc2/notebook/zxf/data",
 ):
     experimental_data_path = f"{data_path}/master_results/{folder_name}"
@@ -117,6 +122,15 @@ def main(
 
     benchmark =  config["benchmark"]
     backday = config['task']['dataset']['kwargs']['step_len']
+
+    # CLI 覆盖（便于滚动增量训练时不改 yaml）
+    if n_epochs_override is not None:
+        n_epoch = int(n_epochs_override)
+    if lr_override is not None:
+        lr = float(lr_override)
+    if train_stop_loss_thred_override is not None:
+        train_stop_loss_thred = float(train_stop_loss_thred_override)
+    print(f"[config] n_epochs={n_epoch}, lr={lr}, train_stop_loss_thred={train_stop_loss_thred}, GPU={GPU}")
 
 
     # added by xhy
@@ -185,7 +199,7 @@ def main(
         )
         if rolling:
             print(f"[rolling] loading init params from: {ckpt_path}")
-            model.load_param(ckpt_path)
+            model.load_param(ckpt_path, strict=bool(strict_load))
         start = time.time()
 
         # Train

@@ -14,6 +14,24 @@ sys.path.insert(0, PROJ_DIRNAME)
 from Master.master import MASTERModel
 
 
+def _parse_seed_step_from_filename(filename: str) -> tuple[int, int]:
+    """
+    从文件名末尾提取 seed 与 step，避免 universe/前缀包含 '_' 时 split 固定长度导致报错。
+
+    例如：
+    - csi800_backday_8_self_exp_17_0.pkl
+    - csi800_rank_backday_8_self_exp_17_0.pkl
+    """
+    stem = filename.rsplit(".", 1)[0]
+    parts = stem.split("_")
+    if len(parts) < 2:
+        raise ValueError(f"Invalid filename: {filename}")
+    seed_str, step_str = parts[-2], parts[-1]
+    if not (seed_str.isdigit() and step_str.isdigit()):
+        raise ValueError(f"Cannot parse seed/step from filename: {filename}")
+    return int(seed_str), int(step_str)
+
+
 ### 1. 加工特征数据
 def processing_predictions(workflow_path,Data_path):
 
@@ -53,8 +71,7 @@ def processing_predictions(workflow_path,Data_path):
 
     test_process_info = pd.DataFrame([])
     for filename in factor_folder_path:
-        _, _, _, _, _, seed, step = filename.split('.')[0].split('_')
-        seed, step = int(seed), int(step)
+        seed, step = _parse_seed_step_from_filename(filename)
         print(f"Filename:{filename} / Seed:{seed} / Step:{step}")
 
         # 加载和转化因子

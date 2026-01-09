@@ -22,6 +22,23 @@ from qlib.contrib.strategy import TopkDropoutStrategy
 
 _T = TypeVar("_T")
 
+def _parse_seed_step_from_filename(filename: str) -> Tuple[int, int]:
+    """
+    从文件名末尾提取 seed 与 step，避免 universe/前缀包含 '_' 时 split 固定长度导致报错。
+
+    例如：
+    - master_predictions_backday_8_csi800_17_0.csv
+    - master_predictions_backday_8_csi800_rank_17_0.csv
+    """
+    stem = filename.rsplit(".", 1)[0]
+    parts = stem.split("_")
+    if len(parts) < 2:
+        raise ValueError(f"Invalid filename: {filename}")
+    seed_str, step_str = parts[-2], parts[-1]
+    if not (seed_str.isdigit() and step_str.isdigit()):
+        raise ValueError(f"Cannot parse seed/step from filename: {filename}")
+    return int(seed_str), int(step_str)
+
 
 @dataclass
 class BacktestResult(DataClassJsonMixin):
@@ -193,8 +210,7 @@ def main(
 
     bt_result = pd.DataFrame()
     for filename in pred_filename_list:
-        _, _, _, _, _, seed, step = filename.split('.')[0].split('_')
-        seed, step = int(seed), int(step)
+        seed, step = _parse_seed_step_from_filename(filename)
 
         print("\n\n" + "-" * 100)
         # qlib初始化

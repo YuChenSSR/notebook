@@ -4,7 +4,6 @@ import random
 import numpy as np
 import time
 import os
-import sys
 import pandas as pd
 import yaml
 import fire
@@ -16,6 +15,7 @@ def main(
         folder_name: str="csi800_20251105_20150101_20251103",
         seed_num: int= None,
         data_path: str=f"/home/idc2/notebook/zxf/data",
+        enable_rank_loss: bool = False,
 ):
     experimental_data_path = f"{data_path}/master_results/{folder_name}"
 
@@ -57,13 +57,11 @@ def main(
     backday = config['task']['dataset']['kwargs']['step_len']
 
 
-    # added by xhy
-    if '--enable_rank_loss' in sys.argv:
+    # enable ranking-based auxiliary loss (fire 参数：--enable_rank_loss=True)
+    universe_tag = universe
+    if enable_rank_loss:
         print('Rank loss enabled!')
-        enable_rank_loss = True
-        universe = universe + '_rank'
-    else:
-        enable_rank_loss = False
+        universe_tag = universe + '_rank'
 
 
     ### 4. 实验
@@ -81,7 +79,7 @@ def main(
     # 随机生成种子
     rng = random.Random(int(time.time()))
     seed_number_list = rng.sample(range(0, 100), seed_num)
-    seed_number_list = [17, 27, 58, 84, 91]
+    # seed_number_list = [17, 27, 58, 84, 91]
     
     print(f"Seed List:{seed_number_list}")
     
@@ -92,7 +90,7 @@ def main(
             d_feat = d_feat, d_model = d_model, t_nhead = t_nhead, s_nhead = s_nhead, T_dropout_rate=dropout, S_dropout_rate=dropout,
             beta=beta, gate_input_end_index=gate_input_end_index, gate_input_start_index=gate_input_start_index,
             n_epochs=n_epoch, lr = lr, GPU = GPU, seed = seed, train_stop_loss_thred = train_stop_loss_thred,
-            save_path=save_path, save_prefix=f'{universe}_backday_{backday}_self_exp_{seed}',
+            save_path=save_path, save_prefix=f'{universe_tag}_backday_{backday}_self_exp_{seed}',
             enable_rank_loss=enable_rank_loss
         )
         start = time.time()
@@ -110,7 +108,7 @@ def main(
         pred_frame = predictions.to_frame()
         pred_frame.columns = ['score']
         pred_frame.reset_index(inplace=True)
-        pred_frame.to_csv(f'{save_path}/master_predictions_backday_{backday}_{universe}_{seed}.csv', index=False, date_format='%Y-%m-%d')
+        pred_frame.to_csv(f'{save_path}/master_predictions_backday_{backday}_{universe_tag}_{seed}.csv', index=False, date_format='%Y-%m-%d')
 
         running_time = time.time()-start
 

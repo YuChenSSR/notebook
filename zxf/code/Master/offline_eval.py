@@ -2,6 +2,8 @@ import os
 import re
 import sys
 import pickle
+import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import fire
@@ -131,6 +133,8 @@ def offline_eval(
     enable_rank_loss: bool = False,
     out_csv: Optional[str] = None,
     return_df: bool = False,
+    progress: bool = True,
+    log_every: int = 50,
 ):
     """
     训练后“后算”验证/测试指标：
@@ -143,6 +147,9 @@ def offline_eval(
         - 'last'  : 每个 seed 只评估最后一个 epoch（最快，默认）
         - 'every' : 每 every_k 个 epoch 评估一次
         - 'all'   : 评估所有 checkpoint（最慢）
+    - progress / log_every:
+        - progress=True 时打印运行进度与 ETA
+        - log_every 控制每隔多少个 checkpoint 打印一次（默认 50）
     """
     split = str(split).strip().lower()
     if split not in {"valid", "test"}:
@@ -183,11 +190,25 @@ def offline_eval(
     if len(ckpts) == 0:
         raise FileNotFoundError("未找到符合条件的 checkpoint（请检查 folder_name/ckpt_subdir/seeds/scope）。")
 
+    # -------------------------
+    # Runtime 统计
+    # -------------------------
+    t0 = time.perf_counter()
+    start_wall = time.time()
+    start_str = datetime.fromtimestamp(start_wall).strftime("%Y-%m-%d %H:%M:%S")
+    if bool(progress):
+        print(
+            f"[INFO] 离线评估开始: {start_str} | split={split} | scope={scope} | ckpts={len(ckpts)} | gpu={GPU}"
+        )
+
     # 每个 seed 复用一个模型实例，只更新参数（state_dict）
     models: Dict[int, MASTERModel] = {}
     rows: List[dict] = []
+    per_ckpt_secs: List[float] = []
 
-    for r in ckpts:
+    log_every = max(int(log_every), 1)
+    for i, r in enumerate(ckpts, start=1):
+        t_iter0 = time.perf_counter()
         seed = int(r["seed"])
         epoch = int(r["epoch"])
         ckpt_path = r["ckpt_path"]
@@ -218,6 +239,7 @@ def offline_eval(
         model.load_param(ckpt_path)
         model.fitted = epoch
         _, metrics = model.predict(dl)
+        per_ckpt_secs.append(time.perf_counter() - t_iter0)
         rows.append(
             {
                 "seed": seed,
@@ -230,12 +252,31 @@ def offline_eval(
                 "RICIR": metrics["RICIR"],
             }
         )
+        if bool(progress) and (i % log_every == 0 or i == len(ckpts)):
+            elapsed = time.perf_counter() - t0
+            avg = elapsed / max(i, 1)
+            eta = avg * (len(ckpts) - i)
+            print(
+                f"[PROGRESS] {i}/{len(ckpts)} ckpts | elapsed={elapsed:.1f}s | avg={avg:.2f}s/ckpt | eta={eta/60:.1f}min"
+            )
 
     df = pd.DataFrame(rows).sort_values(["seed", "epoch"]).reset_index(drop=True)
     if out_csv is None or str(out_csv).strip() == "":
         out_csv = os.path.join(ckpt_dir, f"offline_{split}_metrics_{scope}.csv")
     df.to_csv(out_csv, index=False)
     print(f"[SUCCESS] 离线指标已保存: {out_csv}")
+    # 运行耗时统计（总耗时 + 平均每 ckpt 耗时）
+    elapsed_total = time.perf_counter() - t0
+    end_wall = time.time()
+    end_str = datetime.fromtimestamp(end_wall).strftime("%Y-%m-%d %H:%M:%S")
+    n = len(ckpts)
+    avg_ckpt = (elapsed_total / n) if n > 0 else float("nan")
+    h = int(elapsed_total // 3600)
+    m = int((elapsed_total % 3600) // 60)
+    s = elapsed_total % 60
+    print(
+        f"[RUNTIME] start={start_str} | end={end_str} | elapsed={h:02d}:{m:02d}:{s:05.2f} | ckpts={n} | avg={avg_ckpt:.2f}s/ckpt"
+    )
     # 说明：
     # - 这里默认不返回 DataFrame（否则 python-fire 可能会进入 DataFrame 的“帮助页/分页器”，需要手动按 q 退出）
     # - 如确实需要返回 DataFrame（比如在交互环境里），设置 return_df=True

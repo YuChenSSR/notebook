@@ -77,7 +77,8 @@ class DailyBatchSamplerRandom(Sampler):
 class SequenceModel():
     def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path='model/',
                  save_prefix='', enable_rank_loss=False,
-                 num_workers=None, pin_memory=None, prefetch_factor=None, persistent_workers=None, non_blocking=None):
+                 num_workers=None, pin_memory=None, prefetch_factor=None, persistent_workers=None, non_blocking=None,
+                 eval_freq=None):
         self.n_epochs = n_epochs
         self.lr = lr
         self.device = torch.device(f"cuda:{GPU}" if torch.cuda.is_available() else "cpu")
@@ -125,6 +126,9 @@ class SequenceModel():
             persistent_workers = _env_bool("MASTER_PERSISTENT_WORKERS", True)
         if non_blocking is None:
             non_blocking = _env_bool("MASTER_NON_BLOCKING", True)
+        # 训练过程中验证频率：0=不验证；N>0=每 N 个 epoch 验证一次（默认=1，保持原行为）
+        if eval_freq is None:
+            eval_freq = _env_int("MASTER_EVAL_FREQ", 1)
 
         num_workers = max(int(num_workers), 0)
         self.num_workers = num_workers
@@ -132,6 +136,7 @@ class SequenceModel():
         self.prefetch_factor = max(int(prefetch_factor), 1)
         self.persistent_workers = bool(persistent_workers) if self.num_workers > 0 else False
         self.non_blocking = bool(non_blocking) and self.pin_memory
+        self.eval_freq = max(int(eval_freq), 0)
 
     def init_model(self):
         if self.model is None:
@@ -178,7 +183,8 @@ class SequenceModel():
         losses = []
 
         for data in data_loader:
-            data = torch.squeeze(data, dim=0)
+            # DataLoader 输出在 CPU；优先一次性搬到 GPU，再在 GPU 上切片，减少 H2D 拷贝次数与 CPU 侧切片开销
+            data = torch.squeeze(data, dim=0).to(self.device, non_blocking=self.non_blocking)
             # print(data.shape)
             '''
             data.shape: (N, T, F)
@@ -186,8 +192,8 @@ class SequenceModel():
             T - length of lookback_window, 8
             F - 158/360 factors + 63 market information + 1 label           
             '''
-            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
-            label = data[:, -1, -1].to(self.device, non_blocking=self.non_blocking)
+            feature = data[:, :, 0:-1]
+            label = data[:, -1, -1]
 
             # Additional process on labels
             # If you use original data to train, you won't need the following lines because we already drop extreme when we dumped the data.
@@ -223,9 +229,9 @@ class SequenceModel():
         losses = []
 
         for data in data_loader:
-            data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
-            label = data[:, -1, -1].to(self.device, non_blocking=self.non_blocking)
+            data = torch.squeeze(data, dim=0).to(self.device, non_blocking=self.non_blocking)
+            feature = data[:, :, 0:-1]
+            label = data[:, -1, -1]
 
             # You cannot drop extreme labels for test.
             label = zscore(label)
@@ -265,21 +271,31 @@ class SequenceModel():
 
     def fit(self, dl_train, dl_valid=None):
         train_loader = self._init_data_loader(dl_train, shuffle=True, drop_last=True)
-        best_param = None
-        # 验证集IC辅助判断
-        last_valid_ic = 0
 
         process_info = pd.DataFrame([])     # 过程信息
         for step in range(self.n_epochs):
             train_loss = self.train_epoch(train_loader)
             self.fitted = step
-            if dl_valid:
-                predictions, metrics = self.predict(dl_valid)
-                print("Seed %d, Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f." % (self.seed, step, train_loss, metrics['IC'], metrics['ICIR'], metrics['RIC'], metrics['RICIR']))
-            else:
-                print("Seed %d, Epoch %d, train_loss %.6f" % (self.seed, step, train_loss))
+            metrics = {
+                'IC': float("nan"),
+                'ICIR': float("nan"),
+                'RIC': float("nan"),
+                'RICIR': float("nan"),
+            }
 
-            last_valid_ic = metrics['IC']
+            # 是否在当前 epoch 做验证：
+            # - eval_freq=0: 完全不验证（训练最快，避免 GPU 等待 CPU 指标计算）
+            # - eval_freq>0: 每 eval_freq 个 epoch 验证一次
+            do_eval = (dl_valid is not None) and (self.eval_freq > 0) and (step % self.eval_freq == 0)
+            if do_eval:
+                _, metrics = self.predict(dl_valid)
+                print(
+                    "Seed %d, Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f."
+                    % (self.seed, step, train_loss, metrics['IC'], metrics['ICIR'], metrics['RIC'], metrics['RICIR'])
+                )
+            else:
+                # 跳过验证时，只打印训练损失
+                print("Seed %d, Epoch %d, train_loss %.6f" % (self.seed, step, train_loss))
 
             # 输出信息
             df = {
@@ -297,8 +313,8 @@ class SequenceModel():
             # if (train_loss <= self.train_stop_loss_thred) and (last_valid_ic - metrics['IC'] <= 0.005):
             # Do not use valid data performance to judge the train stop contidion.
             # 每个种子均输出
-            best_param = copy.deepcopy(self.model.state_dict())
-            torch.save(best_param, f'{self.save_path}/{self.save_prefix}_{step}.pkl')
+            # 直接保存当前 state_dict 即可；避免 deepcopy 带来的额外拷贝/同步开销
+            torch.save(self.model.state_dict(), f'{self.save_path}/{self.save_prefix}_{step}.pkl')
             if train_loss <= self.train_stop_loss_thred:
                 break
 
@@ -310,8 +326,8 @@ class SequenceModel():
         encs = []
         self.model.eval()
         for data in test_loader:
-            data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
+            data = torch.squeeze(data, dim=0).to(self.device, non_blocking=self.non_blocking)
+            feature = data[:, :, 0:-1]
             with torch.inference_mode():
                 enc = self.model.encode(feature.float()).detach().cpu().numpy()
             encs.append(enc)
@@ -338,8 +354,10 @@ class SequenceModel():
         self.model.eval()
         for data in test_loader:
             data = torch.squeeze(data, dim=0)
-            feature = data[:, :, 0:-1].to(self.device, non_blocking=self.non_blocking)
+            # label 仅用于 CPU 上的 IC/RIC 统计，保持在 CPU 以避免额外 D2H
             label = data[:, -1, -1]
+            data = data.to(self.device, non_blocking=self.non_blocking)
+            feature = data[:, :, 0:-1]
 
             # nan label will be automatically ignored when compute metrics.
             # zscorenorm will not affect the results of ranking-based metrics.

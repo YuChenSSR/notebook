@@ -130,6 +130,7 @@ def offline_eval(
     gpu: Optional[int] = None,
     enable_rank_loss: bool = False,
     out_csv: Optional[str] = None,
+    return_df: bool = False,
 ):
     """
     训练后“后算”验证/测试指标：
@@ -235,7 +236,10 @@ def offline_eval(
         out_csv = os.path.join(ckpt_dir, f"offline_{split}_metrics_{scope}.csv")
     df.to_csv(out_csv, index=False)
     print(f"[SUCCESS] 离线指标已保存: {out_csv}")
-    return df
+    # 说明：
+    # - 这里默认不返回 DataFrame（否则 python-fire 可能会进入 DataFrame 的“帮助页/分页器”，需要手动按 q 退出）
+    # - 如确实需要返回 DataFrame（比如在交互环境里），设置 return_df=True
+    return df if bool(return_df) else out_csv
 
 
 if __name__ == "__main__":

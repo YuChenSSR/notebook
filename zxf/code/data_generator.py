@@ -30,10 +30,14 @@ def data_generator(
         qlib_path: str="/home/idc2/notebook/qlib_bin/cn_data_train",
         data_path: str="/home/idc2/notebook/zxf/data",
         folder_name: str="csi800_20260106_20150101_20260106",
+        config_path: str | None = None,
+        overwrite_exp_config: bool = True,
 ):
 
     qlib.init(provider_uri=qlib_path, region=REG_CN)
-    with open(f"{data_path}/workflow_config_master_Alpha158_{market_name}.yaml", 'r') as f:
+    if config_path is None or str(config_path).strip() == "":
+        config_path = f"{data_path}/workflow_config_master_Alpha158_{market_name}.yaml"
+    with open(str(config_path), 'r') as f:
         config = yaml.safe_load(f)
 
     start_date = config["task"]["dataset"]["kwargs"]["segments"]["train"][0].strftime("%Y%m%d")
@@ -53,6 +57,13 @@ def data_generator(
 
     config["task"]["dataset"]["kwargs"]["handler"] = f"file://{h_path}"
     dataset = init_instance_by_config(config['task']["dataset"])
+
+    # 将本次使用的 workflow_config 写入实验目录，保证可追溯/可复现
+    exp_cfg_path = Path(save_path) / f"workflow_config_master_Alpha158_{market_name}.yaml"
+    if overwrite_exp_config or (not exp_cfg_path.exists()):
+        with exp_cfg_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+
     dl_train = dataset.prepare("train", col_set=["feature", "label"], data_key=DataHandlerLP.DK_L)
     with open(f'{save_path}/{market_name}_self_dl_train.pkl', 'wb') as file: pickle.dump(dl_train, file)
     del dl_train

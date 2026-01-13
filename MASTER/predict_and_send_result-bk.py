@@ -40,35 +40,19 @@ with open(f'{predict_data_dir}/{universe}_self_dl_test.pkl', 'rb') as f:
 # print(test.data)
 
 print("Data Loaded.")
-#524 featture--->5seed ；板块轮动获取很强，比较稳健。
-d_feat = 435
-d_model = 256
-gate_input_start_index = 435
-gate_input_end_index = 523
-dropout = 0.5
-lr = 1e-5
 
-#520 featture  --->6 seed
-# d_feat = 431
-# d_model = 1024
-# gate_input_start_index = 431
-# gate_input_end_index = 519
-# dropout = 0.15
-# lr = 1.5e-5
-
-#520 featture  --->7 seed  板块反转行情轮动获取很强，收益波动较大。
-# d_feat = 479
-# d_model = 1024
-# gate_input_start_index = 479
-# gate_input_end_index = 567
-# dropout = 0.3
-# lr = 1.5e-5
-
+d_feat = 431
+d_model = 520
 t_nhead = 4
 s_nhead = 2
+dropout = 0.5
+gate_input_start_index = 431
+gate_input_end_index = 519
+
 n_epoch = 100
+lr = 1e-5
 GPU = 0
-train_stop_loss_thred = 0.5
+train_stop_loss_thred = 0.92
 
 if universe == 'csi300':
     beta = 5
@@ -100,11 +84,11 @@ if universe == 'csi300':
 elif universe == 'csi500':
     seed = 0
 elif universe == 'csi800':
-    seed = 5   #feature 524 种子
-    # seed = 6   #feature 520 种子
-    # seed = 7   #feature 568 种子
-elif universe == 'csi1000':
+    # seed = 4   #feature 222 种子
+    # seed = 5   #feature 524 种子
     seed = 6   #feature 520 种子
+elif universe == 'csi1000':
+    seed = 0
 else:
     seed = 0 
 

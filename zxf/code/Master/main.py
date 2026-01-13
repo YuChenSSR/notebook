@@ -4,6 +4,7 @@ import random
 import numpy as np
 import time
 import os
+import re
 import sys
 import json
 import pandas as pd
@@ -33,6 +34,31 @@ except Exception:
     select_best_ckpt = None  # 在 incremental=False 的常规训练中不会用到
 
 
+def _parse_ckpt_filename(fname: str):
+    """
+    从 checkpoint 文件名解析 (seed, epoch)。
+
+    期望格式：..._self_exp_{seed}_{epoch}.pkl
+    - seed / epoch 都必须是整数
+    - 返回: (seed:int, epoch:int)；解析失败返回 None
+    """
+    if not isinstance(fname, str) or not fname.endswith(".pkl"):
+        return None
+    stem = fname[:-4]
+    if "_" not in stem:
+        return None
+    prefix, epoch_str = stem.rsplit("_", 1)
+    try:
+        epoch = int(epoch_str)
+    except Exception:
+        return None
+    m = re.search(r"_self_exp_(\d+)$", prefix)
+    if m is None:
+        return None
+    seed = int(m.group(1))
+    return seed, epoch
+
+
 def main(
         # project_dir: str = "/c/Quant",
         market_name: str="csi800",
@@ -47,6 +73,9 @@ def main(
         roll_to_latest: bool = True,
         resume_from: str = "best",
         best_metric: str = "valid_IC",
+        ckpt_path: str | None = None,
+        resume_seed_override: int | None = None,
+        resume_epoch_override: int | None = None,
         force_eval: bool = False,
         n_epochs_override: int | None = None,
 ):
@@ -89,25 +118,48 @@ def main(
             overwrite_exp_config=True,
         )
 
-        # 3) 从上一轮实验选择 best ckpt（默认 valid_IC 最大；评估对象=每 seed 最后 ckpt）
-        best_json = os.path.join(experimental_data_path, "best_ckpt_valid_ic.json")
-        best_json = select_best_ckpt(
-            market_name=market_name,
-            prev_folder_name=prev_folder_name,
-            data_path=data_path,
-            split="valid",
-            scope="last",
-            metric=best_metric,
-            force_eval=force_eval,
-            out_json=best_json,
-        )
-        meta = json.loads(open(best_json, "r", encoding="utf-8").read())
-        sel = meta["selected"]
-        resume_ckpt_path = sel["ckpt_path"]
-        resume_seed = int(sel["seed"])
-        resume_epoch = int(sel["epoch"])
-        print(f"[INCREMENTAL] resume_from={resume_from} best_metric={best_metric} seed={resume_seed} epoch={resume_epoch}")
-        print(f"[INCREMENTAL] ckpt_path={resume_ckpt_path}")
+        # 3) 选择 warm-start 起点：
+        #    - 优先使用用户指定的 ckpt_path
+        #    - 否则从上一轮实验自动选择 best ckpt（默认 valid_IC 最大；评估对象=每 seed 最后 ckpt）
+        if ckpt_path is not None and str(ckpt_path).strip() != "":
+            resume_ckpt_path = os.path.abspath(os.path.expanduser(str(ckpt_path)))
+            if not os.path.isfile(resume_ckpt_path):
+                raise FileNotFoundError(f"指定 ckpt_path 不存在: {resume_ckpt_path}")
+
+            parsed = _parse_ckpt_filename(os.path.basename(resume_ckpt_path))
+            if parsed is not None:
+                resume_seed, resume_epoch = parsed
+            else:
+                # 文件名不符合预期时：seed 必须由用户显式给出；epoch 可选
+                if resume_seed_override is None:
+                    raise ValueError(
+                        "无法从 ckpt 文件名解析 seed（期望 ..._self_exp_{seed}_{epoch}.pkl）。"
+                        "请额外传 --resume_seed_override=xxx（必要）与 --resume_epoch_override=yyy（可选）。"
+                    )
+                resume_seed = int(resume_seed_override)
+                resume_epoch = int(resume_epoch_override) if resume_epoch_override is not None else 0
+
+            print(f"[INCREMENTAL] resume_from=path seed={int(resume_seed)} epoch={int(resume_epoch)}")
+            print(f"[INCREMENTAL] ckpt_path={resume_ckpt_path}")
+        else:
+            best_json = os.path.join(experimental_data_path, "best_ckpt_valid_ic.json")
+            best_json = select_best_ckpt(
+                market_name=market_name,
+                prev_folder_name=prev_folder_name,
+                data_path=data_path,
+                split="valid",
+                scope="last",
+                metric=best_metric,
+                force_eval=force_eval,
+                out_json=best_json,
+            )
+            meta = json.loads(open(best_json, "r", encoding="utf-8").read())
+            sel = meta["selected"]
+            resume_ckpt_path = sel["ckpt_path"]
+            resume_seed = int(sel["seed"])
+            resume_epoch = int(sel["epoch"])
+            print(f"[INCREMENTAL] resume_from={resume_from} best_metric={best_metric} seed={resume_seed} epoch={resume_epoch}")
+            print(f"[INCREMENTAL] ckpt_path={resume_ckpt_path}")
 
     ### 1.读取配置文件
     with open(f"{experimental_data_path}/workflow_config_master_Alpha158_{market_name}.yaml", 'r') as f:

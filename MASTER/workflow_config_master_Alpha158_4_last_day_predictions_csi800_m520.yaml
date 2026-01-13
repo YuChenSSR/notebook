@@ -86,10 +86,10 @@ task:
         kwargs:
             seed: 0
             seed_num: 5
-            d_feat: 435
-            d_model: 256
-            gate_input_start_index: 435
-            gate_input_end_index: 523
+            d_feat: 431
+            d_model: 520
+            gate_input_start_index: 431
+            gate_input_end_index: 519
             t_nhead: 4
             s_nhead: 2
             dropout: 0.5

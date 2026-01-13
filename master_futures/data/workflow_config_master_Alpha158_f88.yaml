@@ -37,9 +37,9 @@ task:
       seed_num: 5
 
       # FuturesAlpha158 base_features=163（见 handler_futures_alpha158.py），额外追加 gate_features=8
-      d_feat: 163
-      gate_input_start_index: 163
-      gate_input_end_index: 171
+      d_feat: 162
+      gate_input_start_index: 162
+      gate_input_end_index: 163
 
       d_model: 256
       t_nhead: 4

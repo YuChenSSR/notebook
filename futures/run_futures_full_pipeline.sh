@@ -20,7 +20,8 @@ OVERWRITE="${OVERWRITE:-1}"              # 1=覆盖重跑；0=已有文件则跳
 OVERWRITE_CALENDAR="${OVERWRITE_CALENDAR:-1}"  # 1=重建交易日历；0=复用已有
 CLEAN="${CLEAN:-0}"                      # 1=清空派生目录再跑
 SANITY="${SANITY:-1}"                    # 1=跑 Step D 校验；0=跳过
-SANITY_CONFIG="${SANITY_CONFIG:-${REPO}/futures/workflow_config_futures_Alpha158.yaml}"  # Step D 用的 config
+# Step D 默认使用主力连续（*88）配置；如需全市场可通过环境变量覆盖 SANITY_CONFIG
+SANITY_CONFIG="${SANITY_CONFIG:-${REPO}/futures/workflow_config_futures_Alpha158_f88.yaml}"  # Step D 用的 config
 
 # ===== Safety checks =====
 if [[ ! -d "${FUTURES_DATA}/raw_data/futures_klines_1m" ]]; then
@@ -74,7 +75,7 @@ python "${CODE_DIR}/build_instruments_f88.py" \
 if [[ "${SANITY}" == "1" ]]; then
   echo "=== Step D: handler/dataset 快速验证（可选） === $(date)"
   echo "SANITY_CONFIG=${SANITY_CONFIG}"
-  python "${REPO}/futures/code/data_generator_futures.py" --config "${SANITY_CONFIG}"
+  python "${REPO}/futures/code/data_generator_futures.py" --config "${SANITY_CONFIG}" --overwrite "${OVERWRITE}"
 fi
 
 echo "=== ALL DONE === $(date)"

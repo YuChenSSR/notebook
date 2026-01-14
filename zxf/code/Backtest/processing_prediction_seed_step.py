@@ -9,11 +9,8 @@ import yaml
 import torch
 from pathlib import Path
 
-# 允许在任意工作目录运行：把上层 `zxf/code/` 加入 sys.path
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJ_DIRNAME = os.path.dirname(_THIS_DIR)  # .../zxf/code
-if PROJ_DIRNAME not in sys.path:
-    sys.path.insert(0, PROJ_DIRNAME)
+PROJ_DIRNAME = '/home/idc2/notebook/zxf/code'
+sys.path.insert(0, PROJ_DIRNAME)
 from Master.master import MASTERModel
 
 

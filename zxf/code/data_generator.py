@@ -12,9 +12,12 @@ from pathlib import Path
 
 
 
-# 将本地qlib目录设置为最高优先级
-QLIB_DIRNAME = '/home/idc2/notebook/qlib'
-sys.path.insert(0, QLIB_DIRNAME)
+# 可选：使用本地 Qlib 源码（开发模式），避免强依赖固定绝对路径
+# - 若你通过 pip/conda 安装了 qlib，这里无需设置
+# - 若你有本地 qlib 源码仓库，可设置环境变量 QLIB_DIRNAME=/abs/path/to/qlib
+QLIB_DIRNAME = os.environ.get("QLIB_DIRNAME", "/home/idc2/notebook/qlib")
+if QLIB_DIRNAME and os.path.isdir(QLIB_DIRNAME):
+    sys.path.insert(0, QLIB_DIRNAME)
 
 
 import qlib

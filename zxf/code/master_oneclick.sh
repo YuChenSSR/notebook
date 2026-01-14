@@ -34,27 +34,27 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 
 ### 读取workflow_config参数
 cd "$project_dir"
-# read -r start_date end_date <<< $(python - <<EOF
-# import yaml
-# from datetime import datetime
-#
-# with open("${data_dir}/workflow_config_master_Alpha158_${market_name}.yaml", 'r') as f:
-#     config = yaml.safe_load(f)
-#
-# start_date = config["task"]["dataset"]["kwargs"]["segments"]["train"][0].strftime("%Y%m%d")
-# end_date = config["task"]["dataset"]["kwargs"]["segments"]["test"][1].strftime("%Y%m%d")
-# print(f"{start_date} {end_date}")
-# EOF
-# )
-# if [ -z "$start_date" ] || [ -z "$end_date" ]; then
-#     echo "Error: Python script failed to extract dates."
-#     exit 1
-# fi
+read -r start_date end_date <<< $(python - <<EOF
+import yaml
+from datetime import datetime
+
+with open("${data_dir}/workflow_config_master_Alpha158_${market_name}.yaml", 'r') as f:
+    config = yaml.safe_load(f)
+
+start_date = config["task"]["dataset"]["kwargs"]["segments"]["train"][0].strftime("%Y%m%d")
+end_date = config["task"]["dataset"]["kwargs"]["segments"]["test"][1].strftime("%Y%m%d")
+print(f"{start_date} {end_date}")
+EOF
+)
+if [ -z "$start_date" ] || [ -z "$end_date" ]; then
+    echo "Error: Python script failed to extract dates."
+    exit 1
+fi
 
 
 ### 生成实验主目录
 # folder_name="${market_name}_${today}_${start_date}_${end_date}"
-folder_name="csi800_20260107_f8_20150101_20251231"
+folder_name="csi800_20260114_20150101_20260113"
 echo "Folder_name:$folder_name"
 
 ### 数据切割

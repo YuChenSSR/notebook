@@ -115,3 +115,4 @@ account_details_*.csv
 *.zip
 *.7z
 
+zxf/code/Evaluate_seeds/*.csv

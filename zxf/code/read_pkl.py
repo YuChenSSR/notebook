@@ -1,9 +1,9 @@
 import pickle
 import numpy as np
 import pandas as pd
-data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260107_f8_20150101_20251231"
+data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260114_20150101_20260113"
 
-
+# notebook/zxf/data/master_results/csi800_20260114_20150101_20260113/csi800_self_dl_test.pkl
 
 ### 2. 读取数据
 with open(f'{data_dir}/csi800_self_dl_test.pkl', 'rb') as f:

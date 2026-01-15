@@ -53,14 +53,14 @@ fi
 
 
 ### 生成实验主目录
-# folder_name="${market_name}_${today}_${start_date}_${end_date}"
-folder_name="csi800_20260114_20150101_20260113"
+folder_name="${market_name}_${today}_${start_date}_${end_date}"
+# folder_name="csi800_20260114_20150101_20260113"
 echo "Folder_name:$folder_name"
 
 ### 数据切割
-# cd "$project_dir"
-# python3 data_generator.py --market_name="$market_name" --folder_name="$folder_name"
-# cp ${data_dir}/workflow_config_master_Alpha158_${market_name}.yaml ${data_dir}/master_results/${folder_name}/
+cd "$project_dir"
+python3 data_generator.py --market_name="$market_name" --folder_name="$folder_name"
+cp ${data_dir}/workflow_config_master_Alpha158_${market_name}.yaml ${data_dir}/master_results/${folder_name}/
 
 ### 主实验
 cd "$project_dir/Master"

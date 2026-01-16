@@ -11,8 +11,8 @@ source /opt/anaconda3/etc/profile.d/conda.sh
 conda activate pytorch
 
 # rqdatac license
-# LICENSE_FILE="/home/idc2/notebook/rqdata/.rqdatac/license.txt"
-LICENSE_FILE="/home/idc2/notebook/rqdata/cron/license_lin.txt"
+LICENSE_FILE="/home/idc2/notebook/rqdata/.rqdatac/license.txt"
+# LICENSE_FILE="/home/idc2/notebook/rqdata/cron/license_lin.txt"
 
 # 检查许可证文件是否存在
 if [ ! -f "$LICENSE_FILE" ]; then

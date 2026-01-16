@@ -21,6 +21,7 @@ PREV_FOLDER_NAME="${PREV_FOLDER_NAME:-}"
 CKPT_PATH="${CKPT_PATH:-}"
 RESUME_SEED_OVERRIDE="${RESUME_SEED_OVERRIDE:-}"
 RESUME_EPOCH_OVERRIDE="${RESUME_EPOCH_OVERRIDE:-}"
+WARMSTART_INPUT_DIR="${WARMSTART_INPUT_DIR:-}"
 
 # 默认新实验目录名：{market}_{today}_inc_{prev}
 TODAY="$(date +%Y%m%d)"
@@ -34,8 +35,11 @@ PYTHON="${CONDA_PREFIX}/bin/python"
 cd "${PROJECT_DIR}/Master"
 
 if [[ "${INCREMENTAL}" == "1" ]]; then
-  if [[ -z "${PREV_FOLDER_NAME}" ]]; then
-    echo "ERROR: INCREMENTAL=1 需要设置 PREV_FOLDER_NAME（上一轮实验目录名）"
+  # 两种增量模式：
+  # 1) 传统模式：依赖 PREV_FOLDER_NAME（上一轮实验目录），会滚动窗口并重算 dl_*.pkl
+  # 2) warm-start 输入目录模式：提供 WARMSTART_INPUT_DIR（复用既有 YAML + dl_*.pkl），可不填 PREV_FOLDER_NAME
+  if [[ -z "${WARMSTART_INPUT_DIR}" && -z "${PREV_FOLDER_NAME}" ]]; then
+    echo "ERROR: INCREMENTAL=1 需要设置 PREV_FOLDER_NAME（上一轮实验目录名），或设置 WARMSTART_INPUT_DIR（warm-start 输入目录）"
     exit 1
   fi
   "${PYTHON}" main.py \
@@ -44,7 +48,7 @@ if [[ "${INCREMENTAL}" == "1" ]]; then
     --seed_num="${SEED_NUM}" \
     --data_path="${DATA_DIR}" \
     --incremental=True \
-    --prev_folder_name="${PREV_FOLDER_NAME}" \
+    ${PREV_FOLDER_NAME:+--prev_folder_name="${PREV_FOLDER_NAME}"} \
     --qlib_path="${QLIB_PATH}" \
     --roll_to_latest=True \
     --resume_from=best \
@@ -52,6 +56,7 @@ if [[ "${INCREMENTAL}" == "1" ]]; then
     ${CKPT_PATH:+--ckpt_path="${CKPT_PATH}"} \
     ${RESUME_SEED_OVERRIDE:+--resume_seed_override="${RESUME_SEED_OVERRIDE}"} \
     ${RESUME_EPOCH_OVERRIDE:+--resume_epoch_override="${RESUME_EPOCH_OVERRIDE}"} \
+    ${WARMSTART_INPUT_DIR:+--warmstart_input_dir="${WARMSTART_INPUT_DIR}"} \
     ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
 else
   "${PYTHON}" main.py \

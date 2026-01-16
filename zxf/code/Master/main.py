@@ -11,6 +11,8 @@ import pandas as pd
 import yaml
 import fire
 
+import shutil
+
 
 # 允许在任意工作目录运行：把上层 `zxf/code/` 加入 sys.path，以便复用 roll_config / data_generator
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -78,8 +80,66 @@ def main(
         resume_epoch_override: int | None = None,
         force_eval: bool = False,
         n_epochs_override: int | None = None,
+        # ===== warm-start 输入目录（直接复用既有 YAML + dl_*.pkl）=====
+        warmstart_input_dir: str | None = None,
 ):
     experimental_data_path = f"{data_path}/master_results/{folder_name}"
+
+    def _safe_copy(src: str, dst: str) -> None:
+        """
+        将 src 拷贝到 dst（仅 copy；不使用 hardlink/软链）。
+        """
+        src_p = os.path.abspath(os.path.expanduser(str(src)))
+        dst_p = os.path.abspath(os.path.expanduser(str(dst)))
+        os.makedirs(os.path.dirname(dst_p), exist_ok=True)
+        if os.path.exists(dst_p):
+            return
+        shutil.copy2(src_p, dst_p)
+
+    def _stage_warmstart_inputs(warm_dir: str) -> tuple[str, str]:
+        """
+        将 warm-start 输入目录里的 YAML + dl_*.pkl（以及可选 ckpt）放到实验目录，返回：
+        - cfg_path（实验目录下的 workflow_config_master_Alpha158_{market}.yaml）
+        - universe（config["market"]）
+        """
+        warm_dir = os.path.abspath(os.path.expanduser(str(warm_dir)))
+        if not os.path.isdir(warm_dir):
+            raise FileNotFoundError(f"warmstart_input_dir 不存在: {warm_dir}")
+
+        # 1) config：优先找标准命名；找不到则允许目录内唯一 yaml
+        cand_cfg = os.path.join(warm_dir, f"workflow_config_master_Alpha158_{market_name}.yaml")
+        if not os.path.isfile(cand_cfg):
+            ymls = [p for p in os.listdir(warm_dir) if p.endswith(".yaml") or p.endswith(".yml")]
+            # 排除 template
+            ymls = [p for p in ymls if "template" not in p.lower()]
+            if len(ymls) == 1:
+                cand_cfg = os.path.join(warm_dir, ymls[0])
+            else:
+                raise FileNotFoundError(
+                    "warmstart_input_dir 下找不到标准 config："
+                    f"{os.path.basename(cand_cfg)}；且无法从多个 yaml 中自动选择：{ymls}"
+                )
+
+        # 读取 config 以获取 universe
+        with open(cand_cfg, "r") as f:
+            warm_cfg = yaml.safe_load(f)
+        if not isinstance(warm_cfg, dict) or "market" not in warm_cfg:
+            raise ValueError(f"warm-start config 非法（缺少 market）：{cand_cfg}")
+        universe = str(warm_cfg["market"])
+
+        # 2) stage 到实验目录，便于后续离线评估/复现实验
+        os.makedirs(experimental_data_path, exist_ok=True)
+        exp_cfg = os.path.join(experimental_data_path, f"workflow_config_master_Alpha158_{market_name}.yaml")
+        _safe_copy(cand_cfg, exp_cfg)
+
+        for split in ("train", "valid", "test"):
+            src_pkl = os.path.join(warm_dir, f"{universe}_self_dl_{split}.pkl")
+            if not os.path.isfile(src_pkl):
+                raise FileNotFoundError(f"warm-start 缺少数据文件: {src_pkl}")
+            dst_pkl = os.path.join(experimental_data_path, f"{universe}_self_dl_{split}.pkl")
+            _safe_copy(src_pkl, dst_pkl)
+
+        return exp_cfg, universe
 
     # -----------------------------
     # 增量训练：滚动窗口 + 选择 best ckpt + warm-start
@@ -88,35 +148,60 @@ def main(
     resume_seed = None
     resume_epoch = None
     if bool(incremental):
-        if prev_folder_name is None or str(prev_folder_name).strip() == "":
-            raise ValueError("incremental=True 时必须指定 --prev_folder_name")
-        if roll_config is None or generate_data is None or select_best_ckpt is None:
-            raise ImportError("增量训练依赖 roll_config/data_generator/select_best_ckpt，请检查代码与环境")
+        # warmstart_input_dir 模式：直接复用既有 YAML + dl_*.pkl，不再要求 prev_folder_name / roll_config / data_generator
+        if warmstart_input_dir is not None and str(warmstart_input_dir).strip() != "":
+            warm_dir_abs = os.path.abspath(os.path.expanduser(str(warmstart_input_dir)))
+            cfg_path, _ = _stage_warmstart_inputs(warm_dir_abs)
+            print(f"[WARMSTART] Using warm-start inputs from: {os.path.abspath(os.path.expanduser(str(warmstart_input_dir)))}")
+            print(f"[WARMSTART] Staged config: {cfg_path}")
 
-        # 1) 生成滚动后的 workflow_config（写入本次实验目录）
-        cfg_path = None
-        if bool(roll_to_latest):
-            cfg_path = roll_config(
-                market_name=market_name,
-                data_path=data_path,
-                provider_uri=qlib_path,
-                prev_folder_name=prev_folder_name,
-                out_folder_name=folder_name,
-                dry_run=False,
-            )
+            # 如果用户没显式指定 ckpt_path，则尝试从 warm-start 目录自动选择
+            if ckpt_path is None or str(ckpt_path).strip() == "":
+                cand = []
+                for fn in os.listdir(warm_dir_abs):
+                    if not fn.endswith(".pkl"):
+                        continue
+                    # 排除数据 pkl（dl）
+                    if "_self_dl_" in fn:
+                        continue
+                    # 经验规则：checkpoint 文件名包含 _self_exp_
+                    if "_self_exp_" in fn:
+                        cand.append(os.path.join(warm_dir_abs, fn))
+                if len(cand) == 1:
+                    ckpt_path = cand[0]
+                    print(f"[WARMSTART] Auto-selected ckpt_path: {ckpt_path}")
+                elif len(cand) > 1:
+                    raise ValueError(f"[WARMSTART] warm-start 目录下发现多个 ckpt，请显式指定 --ckpt_path：{cand}")
         else:
-            cfg_path = f"{experimental_data_path}/workflow_config_master_Alpha158_{market_name}.yaml"
+            if prev_folder_name is None or str(prev_folder_name).strip() == "":
+                raise ValueError("incremental=True 时必须指定 --prev_folder_name（或提供 --warmstart_input_dir）")
+            if roll_config is None or generate_data is None or select_best_ckpt is None:
+                raise ImportError("增量训练依赖 roll_config/data_generator/select_best_ckpt，请检查代码与环境")
 
-        # 2) 生成本次实验数据（dl_train/dl_valid/dl_test + handler.pkl）
-        #    注意：这里会把实际使用的 config（handler 替换为 file://）写入实验目录，保证可复现
-        generate_data(
-            market_name=market_name,
-            qlib_path=qlib_path,
-            data_path=data_path,
-            folder_name=folder_name,
-            config_path=cfg_path,
-            overwrite_exp_config=True,
-        )
+            # 1) 生成滚动后的 workflow_config（写入本次实验目录）
+            cfg_path = None
+            if bool(roll_to_latest):
+                cfg_path = roll_config(
+                    market_name=market_name,
+                    data_path=data_path,
+                    provider_uri=qlib_path,
+                    prev_folder_name=prev_folder_name,
+                    out_folder_name=folder_name,
+                    dry_run=False,
+                )
+            else:
+                cfg_path = f"{experimental_data_path}/workflow_config_master_Alpha158_{market_name}.yaml"
+
+            # 2) 生成本次实验数据（dl_train/dl_valid/dl_test + handler.pkl）
+            #    注意：这里会把实际使用的 config（handler 替换为 file://）写入实验目录，保证可复现
+            generate_data(
+                market_name=market_name,
+                qlib_path=qlib_path,
+                data_path=data_path,
+                folder_name=folder_name,
+                config_path=cfg_path,
+                overwrite_exp_config=True,
+            )
 
         # 3) 选择 warm-start 起点：
         #    - 优先使用用户指定的 ckpt_path

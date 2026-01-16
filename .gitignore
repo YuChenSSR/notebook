@@ -116,3 +116,5 @@ account_details_*.csv
 *.7z
 
 zxf/code/Evaluate_seeds/*.csv
+MASTER/TimeMixerPP_predictions_csi800b_0.csv
+MASTER/ucast_predictions_csi800c_0.csv

@@ -1,15 +1,19 @@
 import pickle
 import numpy as np
 import pandas as pd
-data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260116_20150101_20260115"
+data_dir = f"/home/idc2/notebook/zxf/data/master_results/csi800_20260117_20150101_20260116"
 
+
+# notebook/zxf/data/master_results/csi1000_20260117_20150101_20260116/csi1000_self_dl_test.pkl
 # notebook/zxf/data/master_results/csi800_20260116_20150101_20260115/csi800_self_dl_test.pkl
 
 ### 2. 读取数据
-with open(f'{data_dir}/csi800_self_dl_test.pkl', 'rb') as f:
+with open(f'{data_dir}/csi800_self_dl_valid.pkl', 'rb') as f:
     dl_train = pickle.load(f)
 
-print(dl_train.data.shape)
+print(dl_train.data)
+
+
 
 for col in dl_train.data.columns:
     print(col)

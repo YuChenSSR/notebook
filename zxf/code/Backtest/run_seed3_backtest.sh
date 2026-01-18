@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# set -euo pipefail
+set -e  # 只保留这个，去掉 pipefail
+set -u  # 保留这个
 
 # source /opt/anaconda3/etc/profile.d/conda.sh
 # conda activate pytorch

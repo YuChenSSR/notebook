@@ -54,7 +54,7 @@ fi
 
 ### 生成实验主目录
 # folder_name="${market_name}_${today}_${start_date}_${end_date}"
-folder_name="csi800_20260116_20150101_20260115"
+folder_name="csi800_128_20260117_20150101_20260116"
 echo "Folder_name:$folder_name"
 
 ### 数据切割

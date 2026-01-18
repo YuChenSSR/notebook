@@ -11,28 +11,21 @@ import fire
 
 
 def main(
-        # project_dir: str = "/c/Quant",
         market_name: str="csi800",
-        folder_name: str="csi800_20251105_20150101_20251103",
         seed_num: int= None,
         data_path: str=f"/home/idc2/notebook/zxf/data",
-        d_model: int=128,
 ):
-    experimental_data_path = f"{data_path}/{folder_name}"
-
     ### 1.读取配置文件
-    with open(f"{experimental_data_path}/workflow_config_master_Alpha158_{market_name}_{d_model}.yaml", 'r') as f:
+    with open(f"{data_path}/workflow_config_master_Alpha158_{market_name}.yaml", 'r') as f:
         config = yaml.safe_load(f)
     universe = config["market"] # 优化，直接从配置文件取值
 
     ### 2.读取实验数据
-    # data_dir = f'../../Data/Results/{folder_name}'
-
-    with open(f'{experimental_data_path}/{universe}_self_dl_train.pkl', 'rb') as f:
+    with open(f'{data_path}/{market_name}_self_dl_train.pkl', 'rb') as f:
         dl_train = pickle.load(f)
-    with open(f'{experimental_data_path}/{universe}_self_dl_valid.pkl', 'rb') as f:
+    with open(f'{data_path}/{market_name}_self_dl_valid.pkl', 'rb') as f:
         dl_valid = pickle.load(f)
-    with open(f'{experimental_data_path}/{universe}_self_dl_test.pkl', 'rb') as f:
+    with open(f'{data_path}/{market_name}_self_dl_test.pkl', 'rb') as f:
         dl_test = pickle.load(f)
     print("Data Loaded.")
 
@@ -70,7 +63,7 @@ def main(
     ### 4. 实验
     # Training
     ######################################################################################
-    save_path = f'{experimental_data_path}/Master_results'
+    save_path = f'{data_path}/Master_results'
     os.makedirs(save_path, exist_ok=True)
 
     ic = []
@@ -81,12 +74,11 @@ def main(
 
     # 随机生成种子
     rng = random.Random(int(time.time()))
-    seed_number_list = rng.sample(range(0, 1000), seed_num)
+    seed_number_list = rng.sample(range(0, 100), seed_num)
     
     print(f"Seed List:{seed_number_list}")
     
     train_process_info = pd.DataFrame([])
-    # for seed in range(seed_num):
     for seed in seed_number_list:
         model = MASTERModel(
             d_feat = d_feat, d_model = d_model, t_nhead = t_nhead, s_nhead = s_nhead, T_dropout_rate=dropout, S_dropout_rate=dropout,

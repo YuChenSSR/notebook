@@ -6,7 +6,7 @@ import os
 import torch
 from pathlib import Path
 
-dirname = "/home/a/notebook/zxf/code"
+dirname = "/home/idc2/notebook/quant"
 if os.path.exists(dirname):
     sys.path.append(dirname)
 
@@ -24,8 +24,8 @@ def processing_pred(
     # proj_path: str = f"c:/Quant",
     # data_path: str = f"C:/data_set",
     market_name: str = "csi800",
-    folder_name: str="seed2",
-    data_path: str=f"/home/a/notebook/zxf/data/Daily_data/Good_seed/seed2"
+    data_path: str=f"/home/a/notebook/zxf/data/Daily_data/Good_seed/seed2",
+    is_batch: bool = False
 ):
 
     # notebook/zxf/data/Daily_data/Good_seed/seed2/csi800_backday_8_self_exp_12_54.pkl
@@ -42,12 +42,16 @@ def processing_pred(
     config_filename = f'{data_path}/workflow_config_master_Alpha158_{market_name}.yaml'
     testdata_filename = f'{data_path}/{market_name}_self_dl_test.pkl'
 
-    param_file_path =  Path(f'{data_path}')
-    param_filename_list = [file.name for file in param_file_path.glob(f"{market_name}*self_exp*.pkl")]
-    
-    # save_path = f'{data_path}/Good_seed/{folder_name}'
-    # os.makedirs(save_path, exist_ok=True)
-    save_path = data_path
+    if is_batch:
+        param_filename_list = read_param_filename(f'{data_path}/Master_results', market_name)
+        save_path = f'{data_path}/Backtest_Results/predictions'
+        os.makedirs(save_path, exist_ok=True)
+
+    else:
+        param_file_path =  Path(f'{data_path}')
+        param_filename_list = [file.name for file in param_file_path.glob(f"{market_name}*self_exp*.pkl")]
+        save_path = data_path
+        
 
     ### 2. 读取参数
     with open(config_filename, 'r') as f:
@@ -77,7 +81,7 @@ def processing_pred(
 
     # #######################################################################
     # ### 4. 运行实验,并生成预测值
-    # param_filename_list = read_param_filename(f'{data_path}/{folder_name}/Master_results', market_name)
+
 
     for filename in param_filename_list:
         seed = int(filename.split('_')[5].split('.pkl')[0])

@@ -4,6 +4,7 @@ import fire
 import sys
 import os
 import torch
+import pandas as pd
 from pathlib import Path
 
 dirname = "/home/idc2/notebook/quant"
@@ -21,35 +22,24 @@ def read_param_filename(param_path, market_name):
 
 
 def processing_pred(
-    # proj_path: str = f"c:/Quant",
-    # data_path: str = f"C:/data_set",
     market_name: str = "csi800",
     data_path: str=f"/home/a/notebook/zxf/data/Daily_data/Good_seed/seed2",
     is_batch: bool = False
 ):
-
-    # notebook/zxf/data/Daily_data/Good_seed/seed2/csi800_backday_8_self_exp_12_54.pkl
-    # data_path="/home/a/notebook/zxf/data/Daily_data"
-    # folder_name="seed2"
-    
+ 
     ### 1. 设置目录/文件名
-    # config_filename = f'{data_path}/Good_seed/{folder_name}/workflow_config_master_Alpha158_{market_name}.yaml'
-    # testdata_filename = f'{data_path}/Training_data/{market_name}/{market_name}_self_dl_test.pkl'
-
-    # param_file_path =  Path(f'{data_path}/Good_seed/{folder_name}')
-    # param_filename_list = [file.name for file in param_file_path.glob(f"{market_name}*self_exp*.pkl")]
-
     config_filename = f'{data_path}/workflow_config_master_Alpha158_{market_name}.yaml'
     testdata_filename = f'{data_path}/{market_name}_self_dl_test.pkl'
-
+    
     if is_batch:
-        param_filename_list = read_param_filename(f'{data_path}/Master_results', market_name)
+        param_file_dir =  Path(f'{data_path}/Master_results')
+        param_filename_list = read_param_filename(param_file_dir, market_name)
         save_path = f'{data_path}/Backtest_Results/predictions'
         os.makedirs(save_path, exist_ok=True)
 
     else:
-        param_file_path =  Path(f'{data_path}')
-        param_filename_list = [file.name for file in param_file_path.glob(f"{market_name}*self_exp*.pkl")]
+        param_file_dir =  Path(f'{data_path}')
+        param_filename_list = [file.name for file in param_file_dir.glob(f"{market_name}*self_exp*.pkl")]
         save_path = data_path
         
 
@@ -81,8 +71,7 @@ def processing_pred(
 
     # #######################################################################
     # ### 4. 运行实验,并生成预测值
-
-
+    test_process_info = pd.DataFrame()
     for filename in param_filename_list:
         seed = int(filename.split('_')[5].split('.pkl')[0])
         step = int(filename.split('_')[6].split('.pkl')[0])
@@ -94,7 +83,7 @@ def processing_pred(
                 n_epochs=n_epoch, lr = lr, GPU = GPU, seed = seed, train_stop_loss_thred = train_stop_loss_thred,
                 save_path=save_path, save_prefix=market_name
             )
-        param_file_path =  Path(f'{data_path}') / filename
+        param_file_path =  Path(param_file_dir) / filename
         
         old_state_dict = torch.load(param_file_path)
 
@@ -108,11 +97,25 @@ def processing_pred(
         model.fitted = 1
 
         predictions, metrics = model.predict(dl_test)
+
+        df = {
+            'Seed': seed,
+            'Step': step,
+            'Test_IC': metrics['IC'],
+            'Test_ICIR': metrics['ICIR'],
+            'Test_RIC': metrics['RIC'],
+            'Test_RICIR': metrics['RICIR']
+        }
+        test_process_info = pd.concat([test_process_info, pd.DataFrame([df])], ignore_index=True)
+
+        
         pred_frame = predictions.to_frame()
         pred_frame.columns = ['score']
         pred_frame.reset_index(inplace=True)
         pred_filename = f'{save_path}/master_predictions_backday_{backday}_{market_name}_{seed}_{step}.csv'
         pred_frame.to_csv(pred_filename, index=False, date_format='%Y-%m-%d')
+        
+    test_process_info.to_csv(f'{save_path}/test_metrics_results.csv', index=False)
 
 if __name__ == "__main__":
     fire.Fire(processing_pred)

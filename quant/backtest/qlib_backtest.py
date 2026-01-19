@@ -200,7 +200,6 @@ def main(
     pred_folder_path = Path(pred_folder_path)
     pred_filename_list = [file.name for file in pred_folder_path.glob("*predictions*.csv")]
 
-
     bt_result = pd.DataFrame()
     for filename in pred_filename_list:
         seed, step = _parse_seed_step_from_filename(filename)
@@ -251,6 +250,10 @@ def main(
         bt_result = pd.concat([bt_result, df_result],ignore_index=True)
     bt_result.to_csv(f'{output_path}/backtest_result.csv', index=False, date_format='%Y-%m-%d')
 
+    # bt_result_file = f'{output_path}/backtest_result.csv'
+    # bt_result =  pd.read_csv(bt_result_file)
+    
+    
     ### 汇总其他信息
     # 读取train info
     train_info_file = f"{data_path}/Master_results/train_metrics_results.csv"

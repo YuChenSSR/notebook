@@ -77,6 +77,9 @@ Log/
 *.ckpt
 *.onnx
 
+# ========= CSV 数据/结果物（通常不纳入版本控制）=========
+*.csv
+
 # ========= Project-specific generated outputs =========
 # qlib build outputs (qlib 子项目自己也有 .gitignore，这里做兜底)
 qlib/build/
@@ -101,6 +104,10 @@ MASTER/out_features/
 MASTER/model/
 MASTER/data/daily_predict/
 MASTER/backup-prg/predictions_xue/
+
+# Quant 回测/实验输出（常包含大量 csv 等结果文件）
+quant/data/experimental_results/**/Backtest_Results/
+quant/data/experimental_results/**/Master_results/
 
 # Generated prediction csvs in MASTER root
 MASTER/master_predictions*.csv

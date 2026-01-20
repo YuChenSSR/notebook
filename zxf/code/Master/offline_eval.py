@@ -122,6 +122,7 @@ def offline_eval(
     market_name: str = "csi800",
     folder_name: str = "csi800_20260107_f8_20150101_20251231",
     data_path: str = "/home/idc2/notebook/zxf/data",
+    input_dir: Optional[str] = None,
     split: str = "valid",
     ckpt_subdir: str = "Master_results",
     scope: str = "all",
@@ -142,6 +143,12 @@ def offline_eval(
     - 训练结束后，用本脚本加载 checkpoint 再计算 IC/ICIR/RIC/RICIR
 
     参数说明（重点）：
+    - input_dir:
+        - 若提供，则直接从该目录读取：
+            - workflow_config_master_Alpha158_{market_name}.yaml
+            - {universe}_self_dl_{split}.pkl
+        - 同时 ckpt_subdir 默认为 "Master_results"，如 ckpt 就在 input_dir 下可用 --ckpt_subdir=.
+        - 提供 input_dir 时，folder_name/data_path 将被忽略（保持向后兼容）
     - split: 'valid' 或 'test'
     - scope:
         - 'last'  : 每个 seed 只评估最后一个 epoch（最快，默认）
@@ -155,7 +162,10 @@ def offline_eval(
     if split not in {"valid", "test"}:
         raise ValueError("split 仅支持: 'valid' | 'test'")
 
-    experimental_data_path = os.path.join(data_path, "master_results", folder_name)
+    if input_dir is not None and str(input_dir).strip() != "":
+        experimental_data_path = os.path.abspath(os.path.expanduser(str(input_dir)))
+    else:
+        experimental_data_path = os.path.join(data_path, "master_results", folder_name)
     cfg = _load_config(experimental_data_path, market_name)
     universe = cfg["market"]
 

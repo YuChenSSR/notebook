@@ -68,3 +68,16 @@ else
     ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
 fi
 
+### 生成预测值
+cd "${PROJECT_DIR}/Backtest"
+"${PYTHON}" processing_prediction_seed_step.py \
+  --data_path="${DATA_DIR}" \
+  --market_name="${MARKET_NAME}" \
+  --folder_name="${FOLDER_NAME}"
+
+### 回测
+cd "${PROJECT_DIR}/Backtest"
+"${PYTHON}" backtest_seed_step.py \
+  --market_name="${MARKET_NAME}" \
+  --folder_name="${FOLDER_NAME}"
+ 

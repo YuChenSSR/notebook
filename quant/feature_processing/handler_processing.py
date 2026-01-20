@@ -14,7 +14,7 @@ from pandas import IndexSlice as idx
 
 
 def main(
-    data_dir: str = "/home/a/notebook/zxf/data/master_results/csi800_128_20260117_20250101_20260116",
+    data_dir: str = "/home/idc2/notebook/quant/data/experimental_results/csi800_240_20260120_20150101_20260116",
     # notebook/zxf/data/master_results/csi800_128_20260117_20250101_20260116/factor_analysis_report_20260117_181653.csv
     market_name: str = 'csi800',
 ):
@@ -23,21 +23,21 @@ def main(
 
     # 门控
     gate_cols = [
-        '$i_change_1',
-        '$i_change_1_mean_5',
-        '$i_change_1_std_5',
-        '$i_change_1_mean_10',
-        '$i_change_1_std_10',
-        '$i_change_1_mean_20',
-        '$i_change_1_std_20',
-        '$i_change_1_mean_30',
-        '$i_change_1_std_30',
-        '$i_change_1_mean_60',
-        '$i_change_1_std_60',
+        # '$i_change_1',
+        # '$i_change_1_mean_5',
+        # '$i_change_1_std_5',
+        # '$i_change_1_mean_10',
+        # '$i_change_1_std_10',
+        # '$i_change_1_mean_20',
+        # '$i_change_1_std_20',
+        # '$i_change_1_mean_30',
+        # '$i_change_1_std_30',
+        # '$i_change_1_mean_60',
+        # '$i_change_1_std_60',
     ]
     ### 读取需要的列名
 
-    filter_cols_path = f"{data_path}/factor_analysis_report_20260117_181653.csv"
+    filter_cols_path = f"{data_path}/factor_analysis_report_20260120_144856.csv"
     filter_cols_file = pd.read_csv(filter_cols_path)
 
     # 筛选条件
@@ -58,7 +58,7 @@ def main(
         print(col)
 
 
-
+    print(f"\n\ncol:{len(need_cols)}")
 
 if __name__ == "__main__":
     fire.Fire(main)

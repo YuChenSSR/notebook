@@ -6,12 +6,13 @@ set -x
 code_dir="/home/idc2/notebook/quant"
 data_dir="/home/idc2/notebook/quant/data"
 market_name="csi800"
-folder_name="csi800_128_20150101_20260116"
+folder_name="csi800_240_20260120_20150101_20260116"
 
 # 数据切割
 # handler、dataset、workflow 需提前放在data_path目录中
 # data_path="$data_dir/experimental_results/"
-data_path="$data_dir/feature_engineering/$market_name/$folder_name"
+data_path="$data_dir/experimental_results/$folder_name"
+# data_path="$data_dir/feature_engineering/$market_name/$folder_name"
 
 
 cd "$code_dir/feature_processing"

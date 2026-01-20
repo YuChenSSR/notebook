@@ -75,7 +75,7 @@ def main(
     # 随机生成种子
     rng = random.Random(int(time.time()))
     seed_number_list = rng.sample(range(0, 100), seed_num)
-    
+    seed_number_list = [16]
     print(f"Seed List:{seed_number_list}")
     
     train_process_info = pd.DataFrame([])

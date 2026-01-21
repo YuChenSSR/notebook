@@ -77,7 +77,7 @@ if [[ ! -f "${QLIB_TRAIN_PATH}/instruments/f88.txt" ]]; then
   exit 1
 fi
 
-if [[ "${BACKTEST}" == "1" ]]; then
+if is_true "${BACKTEST}"; then
   if [[ ! -f "${QLIB_BACKTEST_PATH}/instruments/f88.txt" ]]; then
     echo "ERROR: 找不到 f88.txt: ${QLIB_BACKTEST_PATH}/instruments/f88.txt"
     echo "请先运行：${REPO}/futures/run_futures_full_pipeline.sh"
@@ -92,6 +92,7 @@ BT_OUT="${EXP_DIR}/Backtest_Results/results/backtest_result.csv"
 
 ### Step 1) 数据切割生成三个 pkl 数据集
 if is_true "${GEN_DATA}"; then
+  echo "=== [STEP1/4] GEN_DATA: 生成 dl_train/dl_valid/dl_test pkl === $(date)"
   "${PYTHON}" "${CODE_DIR}/data_generator.py" \
     --market_name="${MARKET_NAME}" \
     --qlib_path="${QLIB_TRAIN_PATH}" \
@@ -99,10 +100,12 @@ if is_true "${GEN_DATA}"; then
     --folder_name="${FOLDER_NAME}" \
     --config_path="${BASE_CONFIG}" \
     --overwrite_exp_config=True
+  echo "=== [STEP1/4] GEN_DATA DONE: ${EXP_DIR}/${MARKET_NAME}_self_dl_{train,valid,test}.pkl === $(date)"
 fi
 
 ### Step 2) 训练主实验（生成 ckpt）
 if is_true "${TRAIN}"; then
+  echo "=== [STEP2/4] TRAIN: 训练主实验（生成 ckpt）=== $(date)"
   if [[ ! -f "${EXP_DIR}/${MARKET_NAME}_self_dl_train.pkl" ]] || [[ ! -f "${EXP_DIR}/${MARKET_NAME}_self_dl_valid.pkl" ]] || [[ ! -f "${EXP_DIR}/${MARKET_NAME}_self_dl_test.pkl" ]]; then
     echo "ERROR: 找不到切分后的三个数据集（dl_train/dl_valid/dl_test）。"
     echo "请先设置 GEN_DATA=True，或确保文件存在于：${EXP_DIR}"
@@ -136,10 +139,12 @@ else
     --incremental=False \
     ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
   fi
+  echo "=== [STEP2/4] TRAIN DONE: ckpt in ${CKPT_DIR} === $(date)"
 fi
 
 ### 生成预测值（对齐股票版流程：Backtest/processing_prediction_seed_step.py）
 if is_true "${PREDICT}"; then
+  echo "=== [STEP3/4] PREDICT: 生成预测值（写入 Backtest_Results/predictions）=== $(date)"
   mkdir -p "${PRED_OUT_DIR}"
   if ! compgen -G "${CKPT_DIR}/*self_exp*.pkl" > /dev/null; then
     echo "ERROR: 找不到训练 ckpt：${CKPT_DIR}/*self_exp*.pkl"
@@ -152,9 +157,11 @@ if is_true "${PREDICT}"; then
     --market_name="${MARKET_NAME}" \
     --folder_name="${FOLDER_NAME}" \
     --overwrite=1
+  echo "=== [STEP3/4] PREDICT DONE: ${PRED_OUT_DIR} === $(date)"
 fi
 
 if is_true "${BACKTEST}"; then
+  echo "=== [STEP4/4] BACKTEST: Qlib 仿真回测（写入 Backtest_Results/results）=== $(date)"
   if ! compgen -G "${PRED_OUT_DIR}/master_predictions_backday_*.csv" > /dev/null; then
     echo "ERROR: 找不到预测文件：${PRED_OUT_DIR}/master_predictions_backday_*.csv"
     echo "请先设置 PREDICT=True 生成预测值。"
@@ -166,5 +173,6 @@ if is_true "${BACKTEST}"; then
     --folder_name="${FOLDER_NAME}" \
     --data_path="${DATA_DIR}" \
     --qlib_path="${QLIB_BACKTEST_PATH}"
+  echo "=== [STEP4/4] BACKTEST DONE: ${BT_OUT} === $(date)"
 fi
 

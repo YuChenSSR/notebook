@@ -5,8 +5,10 @@ set -x
 project_dir="/home/idc2/notebook/quant"
 data_dir="/home/idc2/notebook/quant/data"
 market_name="csi800"
-folder_name="csi800_240_20260120_20150101_20260116"
-seed_num=5
+folder_name="csi800_771_20260121_20150101_20260116"
+
+seed_num=3
+
 
 data_path="$data_dir/experimental_results/$folder_name"
 

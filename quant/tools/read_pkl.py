@@ -13,7 +13,7 @@ def read_data(data_dir):
 def main(
     # data_dir: str = "/home/a/notebook/zxf/data/Daily_data/Beta_data/model_232_128",
     # data_dir: str = "/home/a/notebook/zxf/data/Daily_data/Training_data/csi8",
-    data_dir: str = "/home/idc2/notebook/quant/data/experimental_results/csi800_240_20260120_20150101_20260116",
+    data_dir: str = "/home/idc2/notebook/quant/data/experimental_results/csi800_771_20260121_20150101_20260116",
 
 
     # notebook/zxf/data/Daily_data/Good_seed/seed7/csi800_self_dl_test_raw.pkl

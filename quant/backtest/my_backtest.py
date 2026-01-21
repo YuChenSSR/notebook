@@ -21,7 +21,7 @@ class Backtest:
     def __init__(
             self,
             exp_no: str = f'master_20251020_csi1000_20150101_20251017',     # 预测值目录
-            qlib_path: str = f'/home/a/notebook/cn_data_backtest',          # qlib路径
+            qlib_path: str = f'/home/idc2/notebook/qlib_bin/cn_data_backtest',          # qlib路径
             top_k: int = 6,                                                 # 每日最大持仓个数
             n_drop: int = 2,                                                # 每日卖出个数
             hold_p: int = 5,                                                # 最小持仓天数(非止损止盈)
@@ -807,13 +807,13 @@ class Backtest:
         return metrics
 
 def main(
-    top_k: int = 50,
-    n_drop: int = 5,
+    top_k: int = 5,
+    n_drop: int = 2,
     hold_p: int = 5,
     output_path: str = ".",
 ):
     # output_path="/home/a/notebook/zxf/data/Daily_data/Good_seed/seed3"
-    output_path="/home/a/notebook/zxf/data/Daily_data/Good_seed/seed7"
+    output_path="/home/idc2/notebook/quant/data/experimental_results/csi800_240_1_20260120_20150101_20260116/Backtest_Results"
     backtest = Backtest(
         top_k=top_k,
         n_drop=n_drop,
@@ -829,7 +829,7 @@ def main(
         market_name="csi800",
         printing_info=False,
         # pred_filename="/home/a/notebook/zxf/data/Daily_data/Good_seed/seed3/ucast_predictions_csi800c_0.csv",
-        pred_filename="/home/a/notebook/zxf/data/Daily_data/Good_seed/seed7/master_predictions_backday_8_csi800_multi.csv",
+        pred_filename="/home/idc2/notebook/quant/data/experimental_results/csi800_240_1_20260120_20150101_20260116/Backtest_Results/predictions/master_predictions_backday_8_csi800_35_39.csv",
         output_path=output_path,
         backtest_start_date="2025-09-01",
     )

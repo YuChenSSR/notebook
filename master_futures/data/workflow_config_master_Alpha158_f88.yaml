@@ -74,6 +74,12 @@ task:
 
       n_epochs: 20
       lr: 0.00001
+      # 学习率调度器（可选；不配置则固定 lr）
+      # lr_scheduler: cosine          # 可选: none | cosine | step | plateau
+      # lr_scheduler_kwargs:
+      #   T_max: 20                   # cosine: 1 个周期长度（通常 = n_epochs）
+      #   eta_min: 1.0e-6             # cosine: 最小 lr
+      # lr_scheduler_monitor: train_loss   # plateau 时使用：train_loss / valid_IC / valid_ICIR / valid_RIC / valid_RICIR
       train_stop_loss_thred: 0.2
       GPU: 0
       beta: 2

@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, StepLR
 
 
 def calc_ic(pred, label):
@@ -78,7 +79,8 @@ class SequenceModel():
     def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path='model/',
                  save_prefix='', enable_rank_loss=False,
                  num_workers=None, pin_memory=None, prefetch_factor=None, persistent_workers=None, non_blocking=None,
-                 eval_freq=None):
+                 eval_freq=None,
+                 lr_scheduler=None, lr_scheduler_kwargs=None, lr_scheduler_monitor=None):
         self.n_epochs = n_epochs
         self.lr = lr
         self.device = torch.device(f"cuda:{GPU}" if torch.cuda.is_available() else "cpu")
@@ -99,6 +101,14 @@ class SequenceModel():
         self.save_prefix = save_prefix
 
         self.enable_rank_loss = enable_rank_loss
+
+        # -------------------------
+        # LR Scheduler（可选；默认关闭保持原行为：固定 lr）
+        # -------------------------
+        self.lr_scheduler_name = lr_scheduler
+        self.lr_scheduler_kwargs = lr_scheduler_kwargs if isinstance(lr_scheduler_kwargs, dict) else {}
+        self.lr_scheduler_monitor = lr_scheduler_monitor
+        self.lr_scheduler = None
 
         # DataLoader / H2D pipeline options (不会改变数值结果；仅影响吞吐)
         def _env_int(name, default):
@@ -143,7 +153,102 @@ class SequenceModel():
             raise ValueError("model has not been initialized")
 
         self.train_optimizer = optim.Adam(self.model.parameters(), self.lr)
+        self._init_lr_scheduler()
         self.model.to(self.device)
+
+    def _init_lr_scheduler(self):
+        """
+        初始化学习率调度器（可选）。
+
+        - 默认关闭：与原实现完全一致（固定 lr）
+        - 支持：
+          - cosine  : CosineAnnealingLR
+          - step    : StepLR
+          - plateau : ReduceLROnPlateau
+        """
+        name = self.lr_scheduler_name
+        if name is None:
+            self.lr_scheduler = None
+            return
+        name = str(name).strip().lower()
+        if name in {"", "none", "null", "false", "0"}:
+            self.lr_scheduler = None
+            return
+
+        kw = dict(self.lr_scheduler_kwargs) if isinstance(self.lr_scheduler_kwargs, dict) else {}
+
+        if name in {"cosine", "cosineannealing", "cosineannealinglr"}:
+            T_max = int(kw.pop("T_max", self.n_epochs))
+            eta_min = float(kw.pop("eta_min", 0.0))
+            self.lr_scheduler = CosineAnnealingLR(self.train_optimizer, T_max=T_max, eta_min=eta_min, **kw)
+            return
+
+        if name in {"step", "steplr"}:
+            step_size = int(kw.pop("step_size", max(1, int(self.n_epochs) // 3)))
+            gamma = float(kw.pop("gamma", 0.5))
+            self.lr_scheduler = StepLR(self.train_optimizer, step_size=step_size, gamma=gamma, **kw)
+            return
+
+        if name in {"plateau", "reducelronplateau", "reduce"}:
+            # 默认用 train_loss 做监控（mode=min）；这样即使 eval_freq=0 也能工作
+            mode = str(kw.pop("mode", "min"))
+            factor = float(kw.pop("factor", 0.5))
+            patience = int(kw.pop("patience", 5))
+            min_lr = float(kw.pop("min_lr", 0.0))
+            self.lr_scheduler = ReduceLROnPlateau(
+                self.train_optimizer,
+                mode=mode,
+                factor=factor,
+                patience=patience,
+                min_lr=min_lr,
+                **kw,
+            )
+            return
+
+        raise ValueError(f"Unknown lr_scheduler: {name}. Supported: none|cosine|step|plateau")
+
+    def _step_lr_scheduler(self, train_loss, metrics, do_eval: bool):
+        if self.lr_scheduler is None:
+            return
+
+        # ReduceLROnPlateau: 需要一个“被监控的标量”
+        if isinstance(self.lr_scheduler, ReduceLROnPlateau):
+            monitor = self.lr_scheduler_monitor
+            if monitor is None or str(monitor).strip() == "":
+                monitor = "train_loss"
+            m = str(monitor).strip().lower()
+
+            # 如果监控的是 valid_*，但本轮未做验证，则直接跳过（避免把 NaN 喂给 scheduler）
+            if m.startswith("valid_") and (not bool(do_eval)):
+                return
+
+            if m in {"train_loss", "loss", "train"}:
+                value = train_loss
+            elif m in {"valid_ic", "ic"}:
+                value = metrics.get("IC")
+            elif m in {"valid_icir", "icir"}:
+                value = metrics.get("ICIR")
+            elif m in {"valid_ric", "ric"}:
+                value = metrics.get("RIC")
+            elif m in {"valid_ricir", "ricir"}:
+                value = metrics.get("RICIR")
+            else:
+                raise ValueError(
+                    f"Unknown lr_scheduler_monitor: {monitor}. "
+                    "Supported: train_loss | valid_IC | valid_ICIR | valid_RIC | valid_RICIR"
+                )
+
+            try:
+                v = float(value)
+            except Exception:
+                return
+            if not math.isfinite(v):
+                return
+            self.lr_scheduler.step(v)
+            return
+
+        # 其它 scheduler：按 epoch step
+        self.lr_scheduler.step()
 
     def loss_fn(self, pred, label, rank_loss_ratio=0.01, topk_loss_ratio=0.01, topk_ratio=0.15):
         mask = ~torch.isnan(label)
@@ -279,6 +384,7 @@ class SequenceModel():
 
         process_info = pd.DataFrame([])     # 过程信息
         for step in range(self.n_epochs):
+            curr_lr = float(self.train_optimizer.param_groups[0].get("lr", float("nan"))) if self.train_optimizer else float("nan")
             train_loss = self.train_epoch(train_loader)
             self.fitted = step
             metrics = {
@@ -294,17 +400,27 @@ class SequenceModel():
             do_eval = (dl_valid is not None) and (self.eval_freq > 0) and (step % self.eval_freq == 0)
             if do_eval:
                 _, metrics = self.predict(dl_valid)
-                print(
-                    "Seed %d, Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f."
-                    % (self.seed, step, train_loss, metrics['IC'], metrics['ICIR'], metrics['RIC'], metrics['RICIR'])
-                )
+                if self.lr_scheduler is not None:
+                    print(
+                        "Seed %d, Epoch %d, lr %.2e, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f."
+                        % (self.seed, step, curr_lr, train_loss, metrics['IC'], metrics['ICIR'], metrics['RIC'], metrics['RICIR'])
+                    )
+                else:
+                    print(
+                        "Seed %d, Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f."
+                        % (self.seed, step, train_loss, metrics['IC'], metrics['ICIR'], metrics['RIC'], metrics['RICIR'])
+                    )
             else:
                 # 跳过验证时，只打印训练损失
-                print("Seed %d, Epoch %d, train_loss %.6f" % (self.seed, step, train_loss))
+                if self.lr_scheduler is not None:
+                    print("Seed %d, Epoch %d, lr %.2e, train_loss %.6f" % (self.seed, step, curr_lr, train_loss))
+                else:
+                    print("Seed %d, Epoch %d, train_loss %.6f" % (self.seed, step, train_loss))
 
             # 输出信息
             df = {
                 'Step': step,
+                'LR': curr_lr,
                 'Train_loss': train_loss,
                 'Valid_IC': metrics['IC'],
                 'Valid_ICIR': metrics['ICIR'],
@@ -320,6 +436,10 @@ class SequenceModel():
             # 每个种子均输出
             # 直接保存当前 state_dict 即可；避免 deepcopy 带来的额外拷贝/同步开销
             torch.save(self.model.state_dict(), f'{self.save_path}/{self.save_prefix}_{step}.pkl')
+
+            # epoch 结束后更新学习率（影响下一 epoch）
+            self._step_lr_scheduler(train_loss=train_loss, metrics=metrics, do_eval=do_eval)
+
             if train_loss <= self.train_stop_loss_thred:
                 break
 

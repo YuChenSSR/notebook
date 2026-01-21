@@ -277,6 +277,9 @@ def main(
     if n_epochs_override is not None:
         n_epoch = int(n_epochs_override)
     lr = config["task"]["model"]["kwargs"]["lr"]                                                # lr = 1e-5
+    lr_scheduler = config["task"]["model"]["kwargs"].get("lr_scheduler", None)
+    lr_scheduler_kwargs = config["task"]["model"]["kwargs"].get("lr_scheduler_kwargs", None)
+    lr_scheduler_monitor = config["task"]["model"]["kwargs"].get("lr_scheduler_monitor", None)
     GPU = config["task"]["model"]["kwargs"]["GPU"]                                              # GPU = 0
     train_stop_loss_thred = config["task"]["model"]["kwargs"]["train_stop_loss_thred"]          # train_stop_loss_thred = 0.92
 
@@ -322,6 +325,7 @@ def main(
             d_feat = d_feat, d_model = d_model, t_nhead = t_nhead, s_nhead = s_nhead, T_dropout_rate=dropout, S_dropout_rate=dropout,
             beta=beta, gate_input_end_index=gate_input_end_index, gate_input_start_index=gate_input_start_index,
             n_epochs=n_epoch, lr = lr, GPU = GPU, seed = seed, train_stop_loss_thred = train_stop_loss_thred,
+            lr_scheduler=lr_scheduler, lr_scheduler_kwargs=lr_scheduler_kwargs, lr_scheduler_monitor=lr_scheduler_monitor,
             save_path=save_path, save_prefix=f'{universe_tag}_backday_{backday}_self_exp_{seed}',
             enable_rank_loss=enable_rank_loss
         )
@@ -337,7 +341,7 @@ def main(
         # Train
         train_process_info_df = model.fit(dl_train, dl_valid)
         train_process_info_df['Seed'] = seed
-        train_process_info_df = train_process_info_df[['Seed', 'Step', 'Train_loss', 'Valid_IC', 'Valid_ICIR', 'Valid_RIC', 'Valid_RICIR']]
+        train_process_info_df = train_process_info_df[['Seed', 'Step', 'LR', 'Train_loss', 'Valid_IC', 'Valid_ICIR', 'Valid_RIC', 'Valid_RICIR']]
         train_process_info = pd.concat([train_process_info,train_process_info_df],ignore_index=True)
         print(f"{seed} Model Trained.")
 

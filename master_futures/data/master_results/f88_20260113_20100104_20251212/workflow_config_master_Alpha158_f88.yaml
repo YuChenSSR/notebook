@@ -1,0 +1,85 @@
+qlib_init:
+  provider_uri: /home/idc2/notebook/futures/data/qlib_bin/cn_data_train
+  region: cn
+market: f88
+benchmark: null
+port_analysis_config:
+  strategy:
+    class: TopkDropoutStrategy
+    module_path: qlib.contrib.strategy
+    kwargs:
+      signal: <PRED>
+      topk: 30
+      n_drop: 3
+      only_tradable: false
+      forbid_all_trade_at_limit: false
+  backtest:
+    start_time: 2025-01-01
+    end_time: 2025-12-12
+    freq: day
+    account: 100000000
+    benchmark: null
+    exchange_kwargs:
+      deal_price: close
+      limit_threshold: 0.095
+      open_cost: 0.0015
+      close_cost: 0.0015
+      min_cost: 5
+data_handler_config:
+  start_time: 2010-01-04
+  end_time: 2025-12-12
+  fit_start_time: 2010-01-04
+  fit_end_time: 2024-06-30
+  instruments: f88
+  infer_processors:
+  - class: RobustZScoreNorm
+    kwargs:
+      fields_group: feature
+      clip_outlier: true
+  - class: Fillna
+    kwargs:
+      fields_group: feature
+  learn_processors:
+  - class: DropnaLabel
+    kwargs:
+      fields_group: label
+  label:
+  - Ref($adjclose, -5) / Ref($adjclose, -1) - 1
+task:
+  model:
+    class: MASTERModel
+    module_path: master_futures.code.Master.master
+    kwargs:
+      seed: 0
+      seed_num: 5
+      d_feat: 162
+      gate_input_start_index: 162
+      gate_input_end_index: 163
+      d_model: 256
+      t_nhead: 4
+      s_nhead: 2
+      dropout: 0.2
+      n_epochs: 20
+      lr: 1.0e-05
+      train_stop_loss_thred: 0.2
+      GPU: 0
+      beta: 2
+      market: f88
+      benchmark: null
+      save_prefix: f88
+  dataset:
+    class: TSDatasetH
+    module_path: qlib.data.dataset
+    kwargs:
+      handler: file:///home/idc2/notebook/master_futures/data/master_results/f88_20260113_20100104_20251212/handler_20100104_20251212.pkl
+      segments:
+        train:
+        - 2010-01-04
+        - 2024-06-30
+        valid:
+        - 2024-07-01
+        - 2024-12-31
+        test:
+        - 2025-01-01
+        - 2025-12-12
+      step_len: 8

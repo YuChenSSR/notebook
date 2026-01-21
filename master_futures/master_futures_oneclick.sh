@@ -108,33 +108,33 @@ if is_true "${TRAIN}"; then
     echo "请先设置 GEN_DATA=True，或确保文件存在于：${EXP_DIR}"
     exit 1
   fi
-  if [[ "${INCREMENTAL}" == "1" ]]; then
-    if [[ -z "${PREV_FOLDER_NAME}" ]]; then
-      echo "ERROR: INCREMENTAL=1 需要设置 PREV_FOLDER_NAME（上一轮实验目录名，位于 ${DATA_DIR}/master_results/ 下）"
-      exit 1
-    fi
-    cd "${CODE_DIR}/Master"
-    "${PYTHON}" main.py \
-      --market_name="${MARKET_NAME}" \
-      --folder_name="${FOLDER_NAME}" \
-      --seed_num="${SEED_NUM}" \
-      --data_path="${DATA_DIR}" \
-      --incremental=True \
-      --prev_folder_name="${PREV_FOLDER_NAME}" \
+if [[ "${INCREMENTAL}" == "1" ]]; then
+  if [[ -z "${PREV_FOLDER_NAME}" ]]; then
+    echo "ERROR: INCREMENTAL=1 需要设置 PREV_FOLDER_NAME（上一轮实验目录名，位于 ${DATA_DIR}/master_results/ 下）"
+    exit 1
+  fi
+  cd "${CODE_DIR}/Master"
+  "${PYTHON}" main.py \
+    --market_name="${MARKET_NAME}" \
+    --folder_name="${FOLDER_NAME}" \
+    --seed_num="${SEED_NUM}" \
+    --data_path="${DATA_DIR}" \
+    --incremental=True \
+    --prev_folder_name="${PREV_FOLDER_NAME}" \
       --qlib_path="${QLIB_TRAIN_PATH}" \
-      --roll_to_latest=True \
-      --resume_from=best \
-      --best_metric=valid_IC \
-      ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
-  else
-    cd "${CODE_DIR}/Master"
-    "${PYTHON}" main.py \
-      --market_name="${MARKET_NAME}" \
-      --folder_name="${FOLDER_NAME}" \
-      --seed_num="${SEED_NUM}" \
-      --data_path="${DATA_DIR}" \
-      --incremental=False \
-      ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
+    --roll_to_latest=True \
+    --resume_from=best \
+    --best_metric=valid_IC \
+    ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
+else
+  cd "${CODE_DIR}/Master"
+  "${PYTHON}" main.py \
+    --market_name="${MARKET_NAME}" \
+    --folder_name="${FOLDER_NAME}" \
+    --seed_num="${SEED_NUM}" \
+    --data_path="${DATA_DIR}" \
+    --incremental=False \
+    ${N_EPOCHS_OVERRIDE:+--n_epochs_override=${N_EPOCHS_OVERRIDE}}
   fi
 fi
 

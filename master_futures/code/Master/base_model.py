@@ -18,8 +18,20 @@ def calc_ic(pred, label):
 
 
 def zscore(x):
-    # print(x.std())
-    return (x - x.mean()).div(x.std())
+    """
+    Robust z-score on a 1D torch Tensor.
+
+    Notes
+    - Use unbiased=False to avoid NaN std when numel == 1
+    - Add eps to avoid division by zero when std == 0
+    """
+    eps = 1e-8
+    if x.numel() == 0:
+        return x
+    mean = x.mean()
+    std = x.std(unbiased=False)
+    std = torch.clamp(std, min=eps)
+    return (x - mean) / std
 
 # def zscore(x, eps=1e-8):
 #     """标准化处理，添加极小值保护"""
@@ -34,11 +46,25 @@ def zscore(x):
 
 
 def drop_extreme(x):
-    sorted_tensor, indices = x.sort()
-    N = x.shape[0]
-    percent_2_5 = int(0.025 * N)
-    # Exclude top 2.5% and bottom 2.5% values
-    filtered_indices = indices[percent_2_5:-percent_2_5]
+    """
+    Drop top/bottom 2.5% extreme values.
+
+    IMPORTANT: when N is small (e.g. N < 40), int(0.025 * N) becomes 0.
+    The old implementation would create an empty slice (indices[0:-0] == indices[0:0]),
+    leading to an all-False mask and empty label/feature => NaN loss and corrupting weights.
+    """
+    N = int(x.shape[0])
+    if N <= 0:
+        mask = torch.zeros_like(x, device=x.device, dtype=torch.bool)
+        return mask, x[mask]
+    k = int(0.025 * N)
+    # Too few samples: keep all
+    if k <= 0 or (2 * k >= N):
+        mask = torch.ones_like(x, device=x.device, dtype=torch.bool)
+        return mask, x
+
+    _, indices = x.sort()
+    filtered_indices = indices[k:-k]
     mask = torch.zeros_like(x, device=x.device, dtype=torch.bool)
     mask[filtered_indices] = True
     return mask, x[mask]
@@ -147,9 +173,15 @@ class SequenceModel():
 
     def loss_fn(self, pred, label, rank_loss_ratio=0.01, topk_loss_ratio=0.01, topk_ratio=0.15):
         mask = ~torch.isnan(label)
+        if mask.sum() == 0:
+            # keep a valid (zero) loss tensor without NaN; avoid breaking backward/optimizer
+            return pred.sum() * 0.0
         loss = torch.mean((pred[mask] - label[mask]) ** 2)
 
         if self.enable_rank_loss:
+            # default zero aux losses (avoid unbound local)
+            topk_loss = pred.sum() * 0.0
+
             diff_pred = pred.unsqueeze(1) - pred.unsqueeze(0)  # [N, N]
             diff_label = label.unsqueeze(1) - label.unsqueeze(0)
             S = torch.sign(diff_label)  # [N, N], +1/-1/0
@@ -199,13 +231,25 @@ class SequenceModel():
             # If you use original data to train, you won't need the following lines because we already drop extreme when we dumped the data.
             # If you use the opensource data to train, use the following lines to drop extreme labels.
             #########################
+            # 1) drop NaN labels first (avoid zscore(mean/std) being NaN)
+            mask, label = drop_na(label)
+            if label.numel() < 2:
+                continue
+            feature = feature[mask, :, :]
+
+            # 2) drop extremes (robust for small N)
             mask, label = drop_extreme(label)
+            if label.numel() < 2:
+                continue
             feature = feature[mask, :, :]
             label = zscore(label)  # CSZscoreNorm
             #########################
 
             pred = self.model(feature.float())
             loss = self.loss_fn(pred, label)
+            if not torch.isfinite(loss):
+                # Do NOT backprop NaN/Inf; it will corrupt weights and make subsequent epochs all-NaN
+                continue
             losses.append(loss.detach())
 
             self.train_optimizer.zero_grad()
@@ -234,6 +278,11 @@ class SequenceModel():
             label = data[:, -1, -1]
 
             # You cannot drop extreme labels for test.
+            # But you still need to drop NaNs before zscore to avoid NaN(mean/std) propagating to all elements.
+            mask, label = drop_na(label)
+            if label.numel() < 2:
+                continue
+            feature = feature[mask, :, :]
             label = zscore(label)
 
             with torch.inference_mode():
